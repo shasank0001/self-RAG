@@ -1,11 +1,13 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
-import { apiFetch } from "@/lib/api/client";
+import { apiFetch, apiUpload } from "@/lib/api/client";
 import { useSSE } from "@/hooks/useSSE";
 import { useChatStore } from "@/store/chatStore";
 import type {
+  BinRecord,
   Citation,
+  IngestionAcceptedResponse,
   MessageRecord,
   SessionListItem,
   SessionRecord,
@@ -150,6 +152,20 @@ function normalizeCitations(value: MessageRecord["citations"]): Citation[] {
   return value.filter((item): item is Citation => typeof item === "object" && item !== null && "chunk_id" in item);
 }
 
+function slugifyNamespacePart(value: string): string {
+  const normalized = value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || "bin";
+}
+
+function createVectorNamespace(title: string): string {
+  return `bin-${slugifyNamespacePart(title)}-${Date.now().toString(36)}`;
+}
+
 export function useSessions() {
   if (mockMode) {
     return useQuery({
@@ -206,8 +222,36 @@ export function useBins() {
 
   return useQuery({
     queryKey: ["bins"],
-    queryFn: () =>
-      apiFetch<Array<{ id: string; title: string; description?: string | null; vector_namespace: string }>>("/api/v1/bins"),
+    queryFn: () => apiFetch<BinRecord[]>("/api/v1/bins"),
+  });
+}
+
+export function useCreateBin() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: { title: string; description?: string | null }) =>
+      apiFetch<BinRecord>("/api/v1/bins", {
+        method: "POST",
+        body: {
+          title: payload.title,
+          description: payload.description || null,
+          vector_namespace: createVectorNamespace(payload.title),
+        },
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["bins"] });
+    },
+  });
+}
+
+export function useUploadBinFile() {
+  return useMutation({
+    mutationFn: async ({ binId, file }: { binId: string; file: File }) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return apiUpload<IngestionAcceptedResponse>(`/api/v1/bins/${binId}/items/upload`, formData);
+    },
   });
 }
 
@@ -247,7 +291,10 @@ export function useDeleteSession() {
   if (mockMode) {
     return useMutation({
       mutationFn: async (_sessionId: string) => undefined,
-      onSuccess: async () => {
+      onSuccess: async (_data, sessionId) => {
+        if (useChatStore.getState().activeSessionId === sessionId) {
+          useChatStore.getState().setActiveSession(null);
+        }
         await queryClient.invalidateQueries({ queryKey: ["sessions"] });
       },
     });
@@ -258,7 +305,10 @@ export function useDeleteSession() {
       apiFetch<void>(`/api/v1/sessions/${sessionId}`, {
         method: "DELETE",
       }),
-    onSuccess: async () => {
+    onSuccess: async (_data, sessionId) => {
+      if (useChatStore.getState().activeSessionId === sessionId) {
+        useChatStore.getState().setActiveSession(null);
+      }
       await queryClient.invalidateQueries({ queryKey: ["sessions"] });
       await queryClient.invalidateQueries({ queryKey: ["history-sessions-messages"] });
     },
@@ -388,6 +438,14 @@ export function useChatStream() {
       setStatus(cursor ? "reconnecting" : "connecting");
 
       if (!cursor) {
+        useChatStore.setState((state) => ({
+          ...state,
+          cursor: null,
+          draftAssistantText: "",
+          citations: [],
+          retryCount: 0,
+          lastError: null,
+        }));
         queryClient.setQueryData<MessageRecord[]>(key, (prev = []) => {
           const optimisticUser: MessageRecord = {
             id: `optimistic-user-${Date.now()}`,
@@ -440,7 +498,7 @@ export function useChatStream() {
                 // Non-fatal diagnostics only.
               },
             },
-            { cursor: activeCursor ?? useChatStore.getState().cursor },
+            { cursor: activeCursor },
           );
         } catch (error) {
           streamError = toStreamError(error);

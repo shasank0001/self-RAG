@@ -21,16 +21,27 @@ class ClerkClaims:
 
 class ClerkTokenVerifier:
     def __init__(self) -> None:
-        self._jwks_client: jwt.PyJWKClient | None = None
+        self._jwks_clients: dict[str, jwt.PyJWKClient] = {}
+
+    @staticmethod
+    def _resolve_jwks_url() -> str:
+        settings = get_settings()
+        if settings.clerk_jwks_url:
+            return settings.clerk_jwks_url
+
+        if settings.clerk_issuer:
+            return f"{settings.clerk_issuer.rstrip('/')}/.well-known/jwks.json"
+
+        raise UnauthorizedError(code="auth_config_error", message="Auth verifier misconfigured")
 
     def _get_jwks_client(self) -> jwt.PyJWKClient:
-        settings = get_settings()
-        if not settings.clerk_jwks_url:
+        jwks_url = self._resolve_jwks_url()
+        if not jwks_url:
             raise UnauthorizedError(code="auth_config_error", message="Auth verifier misconfigured")
 
-        if self._jwks_client is None:
-            self._jwks_client = jwt.PyJWKClient(settings.clerk_jwks_url)
-        return self._jwks_client
+        if jwks_url not in self._jwks_clients:
+            self._jwks_clients[jwks_url] = jwt.PyJWKClient(jwks_url)
+        return self._jwks_clients[jwks_url]
 
     def verify_clerk_token(self, token: str) -> ClerkClaims:
         settings = get_settings()

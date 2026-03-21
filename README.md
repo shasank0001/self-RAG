@@ -102,13 +102,14 @@ corepack pnpm dev
    - Frontend API / issuer URL for `CLERK_ISSUER`
 2. Configure backend env (`backend/.env`):
    - `CLERK_ISSUER`
-   - `CLERK_JWKS_URL`
+   - `CLERK_JWKS_URL` (optional, derived automatically from `CLERK_ISSUER` when omitted)
    - `CLERK_AUDIENCE` (optional, if your JWT template uses `aud`)
    - `CLERK_SECRET_KEY`
    - `CLERK_PUBLISHABLE_KEY`
 3. Configure frontend env (`frontend/.env.local`):
    - `VITE_CLERK_PUBLISHABLE_KEY`
 4. Protected API routes now require `Authorization: Bearer <clerk_session_token>`.
+5. Restart the backend after changing Clerk env vars so the verifier picks up the latest settings.
 
 ## Clerk Webhook Setup (Svix)
 

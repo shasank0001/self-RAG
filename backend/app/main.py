@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.middleware.rate_limit import RateLimitMiddleware
 from app.api.middleware.request_context import RequestContextMiddleware
@@ -14,7 +15,7 @@ from app.api.v1.routes.messages import router as messages_router
 from app.api.v1.routes.observability import router as observability_router
 from app.api.v1.routes.sessions import router as sessions_router
 from app.api.v1.routes.webhooks import router as webhooks_router
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import setup_logging
 from app.core.tracing import setup_tracing
@@ -32,6 +33,22 @@ async def lifespan(_: FastAPI):
         await shutdown_ingestion_worker()
 
 
+def _resolve_cors_origins(settings: Settings) -> list[str]:
+    configured = [origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()]
+    if configured:
+        return configured
+
+    # Local development defaults for Vite and localhost aliases.
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:5175",
+        "http://127.0.0.1:5175",
+    ]
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging(settings)
@@ -40,6 +57,13 @@ def create_app() -> FastAPI:
     app.add_middleware(BodySizeLimitMiddleware, settings=settings)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(RateLimitMiddleware, settings=settings)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_resolve_cors_origins(settings),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     register_error_handlers(app)
     setup_tracing(app, settings)
 

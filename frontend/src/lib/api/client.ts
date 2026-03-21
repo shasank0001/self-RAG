@@ -12,6 +12,11 @@ export type StreamPostOptions = {
   headers?: Record<string, string>;
 };
 
+export type ApiUploadOptions = {
+  signal?: AbortSignal;
+  headers?: Record<string, string>;
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export async function apiFetch<T>(path: string, options: ApiClientOptions = {}): Promise<T> {
@@ -63,4 +68,30 @@ export async function streamPost(
   }
 
   return response.body;
+}
+
+export async function apiUpload<T>(
+  path: string,
+  body: FormData,
+  options: ApiUploadOptions = {},
+): Promise<T> {
+  const { signal, headers = {} } = options;
+  const token = await getToken();
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
+    },
+    body,
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Upload failed: ${response.status} ${errorText || response.statusText}`);
+  }
+
+  return (await response.json()) as T;
 }

@@ -32,11 +32,10 @@ class LLMRetryConfig(BaseModel):
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    fallback_chain: list[str] = Field(default_factory=lambda: ["cerebras", "openrouter", "openai", "ollama"])
+    fallback_chain: list[str] = Field(default_factory=lambda: ["cerebras", "openai", "ollama"])
     fallback_models: dict[str, str] = Field(
         default_factory=lambda: {
             "cerebras": "qwen-3-235b-a22b-instruct-2507",
-            "openrouter": "meta-llama/llama-3.1-8b-instruct:free",
             "openai": "gpt-4o-mini",
             "ollama": "llama3.2",
         }
@@ -45,11 +44,8 @@ class LLMConfig(BaseModel):
         default_factory=lambda: {
             "retrieval_decision": LLMNodeConfig(provider="cerebras", model="qwen-3-235b-a22b-instruct-2507"),
             "relevance_grader": LLMNodeConfig(provider="cerebras", model="qwen-3-235b-a22b-instruct-2507"),
-            "query_rewriter": LLMNodeConfig(provider="openrouter", model="meta-llama/llama-3.1-8b-instruct:free"),
-            "answer_generator": LLMNodeConfig(
-                provider="openrouter",
-                model="meta-llama/llama-3.1-8b-instruct:free",
-            ),
+            "query_rewriter": LLMNodeConfig(provider="cerebras", model="qwen-3-235b-a22b-instruct-2507"),
+            "answer_generator": LLMNodeConfig(provider="cerebras", model="qwen-3-235b-a22b-instruct-2507"),
             "hallucination_grader": LLMNodeConfig(provider="cerebras", model="qwen-3-235b-a22b-instruct-2507"),
         }
     )

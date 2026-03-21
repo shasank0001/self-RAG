@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 import type { Citation, StreamDonePayload, StreamErrorPayload } from "@/types/chat";
 
@@ -31,46 +32,57 @@ const initialTransient = {
   lastError: null as StreamErrorPayload | null,
 };
 
-export const useChatStore = create<ChatStore>((set) => ({
-  ...initialTransient,
-  activeSessionId: null,
-  setStatus: (status) => set({ status }),
-  setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
-  appendDraft: (chunk, cursor) =>
-    set((state) => ({
-      draftAssistantText: `${state.draftAssistantText}${chunk}`,
-      cursor: cursor ?? state.cursor,
-      status: "streaming",
-      lastError: null,
-    })),
-  setCitations: (citations, cursor) =>
-    set((state) => ({
-      citations,
-      cursor: cursor ?? state.cursor,
-      lastError: null,
-    })),
-  markDone: (_payload, cursor) =>
-    set((state) => ({
-      status: "idle",
-      draftAssistantText: "",
-      citations: [],
-      cursor: cursor ?? state.cursor,
-      retryCount: 0,
-      lastError: null,
-    })),
-  markError: (payload) =>
-    set(() => ({
-      status: "error",
-      lastError: payload,
-    })),
-  incrementRetry: () =>
-    set((state) => ({
-      retryCount: state.retryCount + 1,
-      status: "reconnecting",
-    })),
-  resetStreamState: () =>
-    set((state) => ({
+export const useChatStore = create<ChatStore>()(
+  persist(
+    (set) => ({
       ...initialTransient,
-      activeSessionId: state.activeSessionId,
-    })),
-}));
+      activeSessionId: null,
+      setStatus: (status) => set({ status }),
+      setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
+      appendDraft: (chunk, cursor) =>
+        set((state) => ({
+          draftAssistantText: `${state.draftAssistantText}${chunk}`,
+          cursor: cursor ?? state.cursor,
+          status: "streaming",
+          lastError: null,
+        })),
+      setCitations: (citations, cursor) =>
+        set((state) => ({
+          citations,
+          cursor: cursor ?? state.cursor,
+          lastError: null,
+        })),
+      markDone: (_payload, cursor) =>
+        set((state) => ({
+          status: "idle",
+          draftAssistantText: "",
+          citations: [],
+          cursor: cursor ?? state.cursor,
+          retryCount: 0,
+          lastError: null,
+        })),
+      markError: (payload) =>
+        set(() => ({
+          status: "error",
+          lastError: payload,
+        })),
+      incrementRetry: () =>
+        set((state) => ({
+          retryCount: state.retryCount + 1,
+          status: "reconnecting",
+        })),
+      resetStreamState: () =>
+        set((state) => ({
+          ...initialTransient,
+          activeSessionId: state.activeSessionId,
+        })),
+    }),
+    {
+      name: "self-rag-chat-store",
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        activeSessionId: state.activeSessionId,
+      }),
+    },
+  ),
+);

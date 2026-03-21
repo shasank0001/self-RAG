@@ -1,11 +1,11 @@
 import { useAuth } from "@clerk/react";
-import { type PropsWithChildren, useEffect } from "react";
+import { type PropsWithChildren, useLayoutEffect } from "react";
 import { setTokenGetter } from "@/lib/auth/token";
 
 function ClerkTokenBridge() {
   const { getToken } = useAuth();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setTokenGetter(async () => getToken());
     return () => {
       setTokenGetter(null);

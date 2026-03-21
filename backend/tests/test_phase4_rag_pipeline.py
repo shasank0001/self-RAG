@@ -144,22 +144,35 @@ async def test_no_bin_path_bypasses_retrieval_and_parametric_mode() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bins_selected_and_skip_path_sets_parametric() -> None:
+async def test_bins_selected_force_retrieval_even_for_small_talk() -> None:
     selected_bin = _make_bin(title="A")
     router = FakeLLMRouter(
         outputs={
-            "retrieval_decision": ['{"decision":"skip","reason":"small talk"}'],
-            "answer_generator": ["parametric via skip"],
+            "relevance_grader": ['{"relevant":true,"score":0.9}'],
+            "answer_generator": ["grounded via selected bin"],
+            "hallucination_grader": ['{"grounded":true,"reason":"supported"}'],
         }
     )
-    vector_index = FakeVectorIndex(rows={selected_bin.vector_namespace: []})
+    vector_index = FakeVectorIndex(
+        rows={
+            selected_bin.vector_namespace: [
+                _match(
+                    chunk_id="a-1",
+                    bin_id=selected_bin.id,
+                    source_name="resume.pdf",
+                    chunk_text="Name: Shasank. Skills: Python, FastAPI, React.",
+                    score=0.95,
+                )
+            ]
+        }
+    )
     _, runtime = _runtime(router=router, vector_index=vector_index)
 
     result = await run_self_rag_graph(runtime=runtime, user_query="how are you", selected_bins=[selected_bin])
 
-    assert result.state.retrieval_mode.value == "parametric"
-    assert result.state.citations == []
-    assert vector_index.calls == []
+    assert result.state.retrieval_mode.value == "grounded"
+    assert vector_index.calls == [selected_bin.vector_namespace]
+    assert result.state.citations
 
 
 @pytest.mark.asyncio
@@ -272,11 +285,19 @@ async def test_hallucination_retries_cap_at_two() -> None:
 @pytest.mark.asyncio
 async def test_router_error_typing_for_non_retryable_auth() -> None:
     selected_bin = _make_bin(title="A")
-    vector_index = FakeVectorIndex(rows={})
+    vector_index = FakeVectorIndex(
+        rows={
+            selected_bin.vector_namespace: [
+                _match(chunk_id="a-1", bin_id=selected_bin.id, source_name="doc-a", chunk_text="A1", score=0.9),
+            ]
+        }
+    )
     router = FakeLLMRouter(
-        outputs={},
+        outputs={
+            "relevance_grader": ['{"relevant":true,"score":0.9}'],
+        },
         errors={
-            "retrieval_decision": RouterCallError(
+            "answer_generator": RouterCallError(
                 error_type=RouterErrorType.AUTH,
                 message="bad auth",
                 retryable=False,

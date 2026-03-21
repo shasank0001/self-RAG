@@ -1,20 +1,39 @@
 import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+
+import { useChatStore } from "@/store/chatStore";
 
 const navItems = [
   { path: "/", label: "Bins" },
-  { path: "/chat", label: "Chat" },
   { path: "/history", label: "History" },
   { path: "/settings", label: "Settings" },
 ];
 
 export default function App() {
+  const { pathname } = useLocation();
+  const isChatRoute = pathname.startsWith("/chat");
+  const activeSessionId = useChatStore((state) => state.activeSessionId);
+  const chatPath = activeSessionId ? `/chat/${activeSessionId}` : "/chat";
+
   return (
     <div className="app-shell">
       <header className="topbar">
         <h1>Self-RAG Atlas</h1>
         <nav>
-          {navItems.map((item) => (
+          {navItems.slice(0, 1).map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={({ isActive }) => (isActive ? "active" : "")}
+              end={item.path === "/"}
+            >
+              {item.label}
+            </NavLink>
+          ))}
+          <NavLink to={chatPath} className={({ isActive }) => (isActive ? "active" : "")}>
+            Chat
+          </NavLink>
+          {navItems.slice(1).map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
@@ -35,7 +54,7 @@ export default function App() {
           </Show>
         </div>
       </header>
-      <main className="content">
+      <main className={isChatRoute ? "content is-chat-route" : "content"}>
         <Outlet />
       </main>
     </div>

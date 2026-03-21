@@ -19,6 +19,12 @@ async def retrieval_decision_node(
             "edge_transitions": [*state.edge_transitions, "retrieval_decision:skip_no_bins"],
         }
 
+    return {
+        "next_step": NodeOutcome.RETRIEVE,
+        "retrieval_mode": RetrievalMode.GROUNDED,
+        "edge_transitions": [*state.edge_transitions, "retrieval_decision:retrieve_selected_bins"],
+    }
+
     prompt_spec = prompt_registry.get("retrieval_decision")
     prompt = prompt_spec.template.format(query=state.active_query)
 

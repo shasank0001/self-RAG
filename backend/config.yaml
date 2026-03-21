@@ -1,15 +1,14 @@
 llm:
-  fallback_chain: [cerebras, openrouter, openai, ollama]
+  fallback_chain: [cerebras, openai, ollama]
   fallback_models:
     cerebras: qwen-3-235b-a22b-instruct-2507
-    openrouter: meta-llama/llama-3.1-8b-instruct:free
     openai: gpt-4o-mini
     ollama: llama3.2
   nodes:
     retrieval_decision: { provider: cerebras, model: qwen-3-235b-a22b-instruct-2507 }
     relevance_grader: { provider: cerebras, model: qwen-3-235b-a22b-instruct-2507 }
-    query_rewriter: { provider: openrouter, model: meta-llama/llama-3.1-8b-instruct:free }
-    answer_generator: { provider: openrouter, model: meta-llama/llama-3.1-8b-instruct:free }
+    query_rewriter: { provider: cerebras, model: qwen-3-235b-a22b-instruct-2507 }
+    answer_generator: { provider: cerebras, model: qwen-3-235b-a22b-instruct-2507 }
     hallucination_grader: { provider: cerebras, model: qwen-3-235b-a22b-instruct-2507 }
   timeouts_ms:
     default: 12000

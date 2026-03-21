@@ -1,5 +1,39 @@
 export type RetrievalMode = "grounded" | "parametric";
 
+export type BinRecord = {
+  id: string;
+  user_id: string;
+  title: string;
+  description?: string | null;
+  vector_namespace: string;
+};
+
+export type IngestionStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type IngestionAcceptedResponse = {
+  job_id: string;
+  item_id: string;
+  bin_id: string;
+  status: IngestionStatus;
+  attempt_count: number;
+  max_attempts: number;
+};
+
+export type IngestionStatusResponse = {
+  job_id: string;
+  item_id: string | null;
+  bin_id: string;
+  status: IngestionStatus;
+  content_hash: string | null;
+  attempt_count: number;
+  max_attempts: number;
+  last_error: string | null;
+  queued_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string;
+};
+
 export type Citation = {
   item_name: string;
   chunk_excerpt: string;

@@ -5,11 +5,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "backend/.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_name: str = Field(default="self-rag-knowledge-chat", alias="APP_NAME")
     app_env: str = Field(default="development", alias="APP_ENV")
     api_base_url: str = Field(default="http://localhost:8000", alias="API_BASE_URL")
+    cors_allowed_origins: str = Field(default="", alias="CORS_ALLOWED_ORIGINS")
 
     database_url: str = Field(
         default="postgresql+asyncpg://postgres:postgres@localhost:5432/selfrag",

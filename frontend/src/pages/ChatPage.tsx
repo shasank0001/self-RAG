@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { BinPicker } from "@/components/BinPicker";
 import { CitationPanel } from "@/components/CitationPanel";
@@ -18,9 +18,12 @@ import { useChatStore } from "@/store/chatStore";
 
 export function ChatPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { sessionId } = useParams<{ sessionId?: string }>();
   const [draft, setDraft] = useState("");
   const [selectedBinIds, setSelectedBinIds] = useState<string[]>([]);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
 
   const binsQuery = useBins();
   const sessionQuery = useSession(sessionId);
@@ -37,15 +40,27 @@ export function ChatPage() {
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const setActiveSession = useChatStore((state) => state.setActiveSession);
   const resetStreamState = useChatStore((state) => state.resetStreamState);
+  const isExplicitNewChat = new URLSearchParams(location.search).get("new") === "1";
+
+  useEffect(() => {
+    if (sessionId || isExplicitNewChat || !activeSessionId) {
+      return;
+    }
+
+    navigate(`/chat/${activeSessionId}`, { replace: true });
+  }, [activeSessionId, isExplicitNewChat, navigate, sessionId]);
 
   useEffect(() => {
     setActiveSession(sessionId ?? null);
     resetStreamState();
+  }, [resetStreamState, sessionId, setActiveSession]);
+
+  useEffect(() => {
     return () => {
       cancelStream();
       resetStreamState();
     };
-  }, [cancelStream, resetStreamState, sessionId, setActiveSession]);
+  }, [cancelStream, resetStreamState]);
 
   useEffect(() => {
     if (!sessionQuery.data) {
@@ -53,6 +68,25 @@ export function ChatPage() {
     }
     setSelectedBinIds(sessionQuery.data.last_active_bin_ids);
   }, [sessionQuery.data]);
+
+  useEffect(() => {
+    const messageList = messageListRef.current;
+    if (!messageList) {
+      return;
+    }
+
+    shouldStickToBottomRef.current = true;
+    messageList.scrollTo({ top: messageList.scrollHeight });
+  }, [sessionId]);
+
+  useEffect(() => {
+    const messageList = messageListRef.current;
+    if (!messageList || !shouldStickToBottomRef.current) {
+      return;
+    }
+
+    messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
+  }, [draftAssistantText, messages.length]);
 
   const onSelectBins = async (next: string[]) => {
     setSelectedBinIds(next);
@@ -115,10 +149,25 @@ export function ChatPage() {
     return "Idle";
   }, [status]);
 
+  const onTranscriptScroll = () => {
+    const messageList = messageListRef.current;
+    if (!messageList) {
+      return;
+    }
+
+    const distanceFromBottom = messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 120;
+  };
+
   return (
     <section className="chat-layout page-card">
       <aside className="chat-sidebar">
-        <h2>{sessionId ? "Session" : "New chat"}</h2>
+        <div className="chat-sidebar-header">
+          <h2>{sessionId ? "Session" : "New chat"}</h2>
+          <Link to="/chat?new=1" className="new-chat-link">
+            New chat
+          </Link>
+        </div>
         <p className="connection-banner">{connectionLabel}</p>
         {lastError ? (
           <div className="stream-error">
@@ -145,7 +194,7 @@ export function ChatPage() {
       </aside>
 
       <main className="chat-main">
-        <div className="message-list">
+        <div ref={messageListRef} className="message-list" onScroll={onTranscriptScroll}>
           {messages.map((message) => (
             <article
               key={message.id}

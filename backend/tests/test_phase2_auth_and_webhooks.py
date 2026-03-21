@@ -9,6 +9,7 @@ import app.api.v1.routes.messages as messages_routes
 import app.api.v1.routes.webhooks as webhooks_routes
 import app.auth.dependencies as auth_dependencies
 from app.auth.clerk import ClerkClaims
+from app.auth.clerk import ClerkTokenVerifier
 from app.auth.dependencies import get_current_user
 from app.core.errors import UnauthorizedError
 from app.db.session import get_db_session
@@ -169,6 +170,68 @@ def test_valid_bearer_token_returns_authenticated_subject(monkeypatch) -> None:
     body = response.json()
     assert body["subject"] == "user_123"
     assert body["clerk_user_id"] == "user_123"
+
+
+def test_clerk_verifier_uses_explicit_jwks_url(monkeypatch) -> None:
+    verifier = ClerkTokenVerifier()
+    captured: dict[str, str] = {}
+
+    class FakePyJWKClient:
+        def __init__(self, url: str) -> None:
+            captured["url"] = url
+
+        def get_signing_key_from_jwt(self, _token: str):
+            return SimpleNamespace(key="signing-key")
+
+    monkeypatch.setattr(
+        "app.auth.clerk.get_settings",
+        lambda: SimpleNamespace(
+            clerk_jwks_url="https://example.clerk.accounts.dev/custom-jwks.json",
+            clerk_issuer="https://example.clerk.accounts.dev",
+            clerk_audience="",
+        ),
+    )
+    monkeypatch.setattr("app.auth.clerk.jwt.PyJWKClient", FakePyJWKClient)
+    monkeypatch.setattr(
+        "app.auth.clerk.jwt.decode",
+        lambda *_args, **_kwargs: {"sub": "user_123", "email": "user@example.com"},
+    )
+
+    claims = verifier.verify_clerk_token("good-token")
+
+    assert claims.sub == "user_123"
+    assert captured["url"] == "https://example.clerk.accounts.dev/custom-jwks.json"
+
+
+def test_clerk_verifier_derives_jwks_url_from_issuer(monkeypatch) -> None:
+    verifier = ClerkTokenVerifier()
+    captured: dict[str, str] = {}
+
+    class FakePyJWKClient:
+        def __init__(self, url: str) -> None:
+            captured["url"] = url
+
+        def get_signing_key_from_jwt(self, _token: str):
+            return SimpleNamespace(key="signing-key")
+
+    monkeypatch.setattr(
+        "app.auth.clerk.get_settings",
+        lambda: SimpleNamespace(
+            clerk_jwks_url="",
+            clerk_issuer="https://example.clerk.accounts.dev/",
+            clerk_audience="",
+        ),
+    )
+    monkeypatch.setattr("app.auth.clerk.jwt.PyJWKClient", FakePyJWKClient)
+    monkeypatch.setattr(
+        "app.auth.clerk.jwt.decode",
+        lambda *_args, **_kwargs: {"sub": "user_456", "email": "derived@example.com"},
+    )
+
+    claims = verifier.verify_clerk_token("good-token")
+
+    assert claims.sub == "user_456"
+    assert captured["url"] == "https://example.clerk.accounts.dev/.well-known/jwks.json"
 
 
 def test_create_bin_ignores_client_supplied_owner_id() -> None:
