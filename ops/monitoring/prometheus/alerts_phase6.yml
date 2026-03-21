@@ -1,0 +1,50 @@
+groups:
+  - name: self-rag-phase6
+    rules:
+      - alert: SelfRagHighChatLatencyP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(selfrag_provider_call_latency_ms_bucket[5m]))) > 2.5
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+          owner: rag-platform
+        annotations:
+          summary: "Chat provider latency p95 is elevated"
+          description: "Provider p95 latency over 2.5s for 10m"
+          runbook: "docs/runbooks/slo_and_alert_policy.md"
+
+      - alert: SelfRagProviderFallbackSpike
+        expr: sum(rate(selfrag_provider_fallback_total[10m])) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          team: backend
+          owner: rag-platform
+        annotations:
+          summary: "Provider fallback rate spike"
+          description: "Fallback rate exceeds expected baseline"
+          runbook: "docs/runbooks/slo_and_alert_policy.md"
+
+      - alert: SelfRagIngestionFailuresHigh
+        expr: sum(rate(selfrag_ingestion_jobs_total{status="failed"}[10m])) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          team: backend
+          owner: rag-platform
+        annotations:
+          summary: "Ingestion failure rate is high"
+          description: "Ingestion failures above threshold over 10m window"
+          runbook: "docs/runbooks/security_operations.md"
+
+      - alert: SelfRagCostDriftDetected
+        expr: sum(rate(selfrag_usage_cost_drift_events_total[30m])) > 0.1
+        for: 20m
+        labels:
+          severity: warning
+          team: backend
+          owner: finops
+        annotations:
+          summary: "Provider usage cost drift detected"
+          description: "Estimated cost and provider-reported cost are diverging"
+          runbook: "docs/runbooks/slo_and_alert_policy.md"

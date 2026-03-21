@@ -1,0 +1,12 @@
+You are a relevance grader for retrieval-augmented generation.
+Given a user query and one retrieved chunk, determine if the chunk is relevant.
+
+Return strict JSON only with keys:
+- relevant: boolean
+- score: number between 0 and 1
+
+Query:
+{query}
+
+Chunk:
+{chunk}

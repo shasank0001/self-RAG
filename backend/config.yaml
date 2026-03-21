@@ -1,0 +1,60 @@
+llm:
+  fallback_chain: [cerebras, openrouter, openai, ollama]
+  fallback_models:
+    cerebras: qwen-3-235b-a22b-instruct-2507
+    openrouter: meta-llama/llama-3.1-8b-instruct:free
+    openai: gpt-4o-mini
+    ollama: llama3.2
+  nodes:
+    retrieval_decision: { provider: cerebras, model: qwen-3-235b-a22b-instruct-2507 }
+    relevance_grader: { provider: cerebras, model: qwen-3-235b-a22b-instruct-2507 }
+    query_rewriter: { provider: openrouter, model: meta-llama/llama-3.1-8b-instruct:free }
+    answer_generator: { provider: openrouter, model: meta-llama/llama-3.1-8b-instruct:free }
+    hallucination_grader: { provider: cerebras, model: qwen-3-235b-a22b-instruct-2507 }
+  timeouts_ms:
+    default: 12000
+    generation: 25000
+  retries:
+    transient_max: 1
+
+pipeline:
+  rewrite_max_attempts: 3
+  hallucination_max_retries: 2
+  relevance_threshold: 0.5
+  node_timeout_ms: 30000
+  retrieval:
+    top_k_per_namespace: 5
+    merged_top_n: 10
+
+embedding:
+  active_provider: ollama
+  active_model: qwen3-embedding:4b
+  dimensions: 2560
+  enforce_ingest_alignment: true
+
+prompts:
+  nodes:
+    retrieval_decision:
+      id: retrieval_decision
+      version: v1
+      path: templates/retrieval_decision/v1.txt
+    relevance_grader:
+      id: relevance_grader
+      version: v1
+      path: templates/relevance_grader/v1.txt
+    query_rewriter:
+      id: query_rewriter
+      version: v1
+      path: templates/query_rewriter/v1.txt
+    answer_generator:
+      id: answer_generator
+      version: v1
+      path: templates/answer_generator/v1.txt
+    answer_generator_parametric:
+      id: answer_generator_parametric
+      version: v1
+      path: templates/answer_generator_parametric/v1.txt
+    hallucination_grader:
+      id: hallucination_grader
+      version: v1
+      path: templates/hallucination_grader/v1.txt

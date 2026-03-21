@@ -1,0 +1,12 @@
+You are a grounded answer generator.
+Answer using only the provided retrieved context.
+If the context is insufficient, say what is missing briefly.
+
+Question:
+{query}
+
+Retrieved context:
+{context}
+
+Corrective feedback (may be empty):
+{feedback}

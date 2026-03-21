@@ -1,0 +1,54 @@
+{
+  "title": "Self-RAG Phase 6 Observability",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["self-rag", "phase6"],
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Provider Call Latency p95",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(selfrag_provider_call_latency_ms_bucket[5m])))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Fallback Rate",
+      "targets": [
+        {
+          "expr": "sum(rate(selfrag_provider_fallback_total[5m]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Ingestion Failures",
+      "targets": [
+        {
+          "expr": "sum(rate(selfrag_ingestion_jobs_total{status=\"failed\"}[5m]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Estimated Provider Cost",
+      "targets": [
+        {
+          "expr": "sum(rate(selfrag_usage_rollup_estimated_cost_usd_sum[5m]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cost Drift Events",
+      "targets": [
+        {
+          "expr": "sum(rate(selfrag_usage_cost_drift_events_total[15m]))"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+backend/.venv/
+frontend/node_modules/
+frontend/dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.log
+.env
+.env.local
+backend/.env
+frontend/.env.local
+*.sqlite3
+.idea/
+.vscode/
+
+# Media artifacts
+*.png
+
+# Planning docs (root)
+/phase*_plan.md
+/plan.md
+/plan_review.md
+
+# Planning docs (anywhere)
+**/*_plan.md
+
+# Local database backups
+*.dump
+ops/db/**/backups/

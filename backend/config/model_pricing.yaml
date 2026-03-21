@@ -1,0 +1,20 @@
+models:
+  - provider: openai
+    model: gpt-4o-mini
+    input_per_1k_tokens_usd: 0.00015
+    output_per_1k_tokens_usd: 0.0006
+
+  - provider: openrouter
+    model: meta-llama/llama-3.1-8b-instruct:free
+    input_per_1k_tokens_usd: 0.0
+    output_per_1k_tokens_usd: 0.0
+
+  - provider: cerebras
+    model: qwen-3-235b-a22b-instruct-2507
+    input_per_1k_tokens_usd: 0.0012
+    output_per_1k_tokens_usd: 0.0012
+
+  - provider: ollama
+    model: llama3.2
+    input_per_1k_tokens_usd: 0.0
+    output_per_1k_tokens_usd: 0.0

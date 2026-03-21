@@ -1,0 +1,15 @@
+{
+  "retrieval_decision": {
+    "query": "What does the contract say about renewal?",
+    "expected_phrase": "decision"
+  },
+  "answer_generator": {
+    "query": "Summarize obligations",
+    "context": "[1] Bin | file.txt | c1\nThe obligations are listed in section 3.",
+    "expected_phrase": "Retrieved context"
+  },
+  "answer_generator_parametric": {
+    "query": "What is photosynthesis?",
+    "expected_phrase": "general knowledge"
+  }
+}

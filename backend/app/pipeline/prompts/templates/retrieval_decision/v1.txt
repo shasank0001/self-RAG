@@ -1,0 +1,10 @@
+You are a retrieval decision classifier.
+Return strict JSON only with keys:
+- decision: "retrieve" or "skip"
+- reason: short reason string
+
+Choose "retrieve" when the user query likely depends on user-provided documents.
+Choose "skip" when the query can be answered from general knowledge and document retrieval is unnecessary.
+
+User query:
+{query}

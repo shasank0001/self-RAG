@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: selfrag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: selfrag
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d selfrag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: infra/docker/backend.Dockerfile
+    container_name: selfrag-backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: development
+      APP_NAME: self-rag-knowledge-chat
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/selfrag
+      ALEMBIC_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/selfrag
+      API_BASE_URL: http://localhost:8000
+      CLERK_ISSUER: https://your-clerk-domain
+      CLERK_JWKS_URL: https://your-clerk-domain/.well-known/jwks.json
+      CLERK_AUDIENCE: ""
+      CLERK_SECRET_KEY: sk_test_xxx
+      CLERK_PUBLISHABLE_KEY: pk_test_xxx
+      CLERK_WEBHOOK_SECRET: whsec_xxx
+      PINECONE_API_KEY: pcsk_xxx
+      PINECONE_INDEX_NAME: self-rag-knowledge-chat
+      PINECONE_REGION: us-east-1
+      PINECONE_HOST: ""
+      CEREBRAS_API_KEY: ""
+      CEREBRAS_BASE_URL: https://api.cerebras.ai/v1
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/api/v1/ready\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    profiles: ["dev"]
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: selfrag-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    profiles: ["dev"]
+
+volumes:
+  postgres_data:

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "grounded_001",
+    "query": "What obligations are listed in the uploaded policy?",
+    "bins": ["policy"],
+    "expected_retrieval_mode": "grounded",
+    "expected_citation_chunk_ids": ["policy_chunk_1"],
+    "expected_min_grounding_score": 0.9,
+    "expected_min_relevance_precision": 0.8,
+    "expected_min_retrieval_hit_rate": 0.8
+  },
+  {
+    "id": "parametric_001",
+    "query": "What is the capital of France?",
+    "bins": [],
+    "expected_retrieval_mode": "parametric",
+    "expected_citation_chunk_ids": [],
+    "expected_min_grounding_score": 1.0,
+    "expected_min_relevance_precision": 1.0,
+    "expected_min_retrieval_hit_rate": 1.0
+  }
+]

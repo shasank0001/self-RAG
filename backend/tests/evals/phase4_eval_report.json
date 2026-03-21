@@ -1,0 +1,43 @@
+{
+  "totals": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0
+  },
+  "results": [
+    {
+      "case_id": "grounded_001",
+      "retrieval_mode": "grounded",
+      "citation_chunk_ids": [
+        "policy_chunk_1"
+      ],
+      "retrieval_hit_rate": 1.0,
+      "relevance_precision": 1.0,
+      "grounding_score": 1.0,
+      "passed": true,
+      "degraded_node_paths": [],
+      "degraded_provider_paths": [],
+      "prompt_versions": {
+        "retrieval_decision": "v1",
+        "embedding_resolution": "deterministic:deterministic-v1:64",
+        "relevance_grader": "v1",
+        "answer_generator": "v1",
+        "hallucination_grader": "v1"
+      }
+    },
+    {
+      "case_id": "parametric_001",
+      "retrieval_mode": "parametric",
+      "citation_chunk_ids": [],
+      "retrieval_hit_rate": 1.0,
+      "relevance_precision": 1.0,
+      "grounding_score": 1.0,
+      "passed": true,
+      "degraded_node_paths": [],
+      "degraded_provider_paths": [],
+      "prompt_versions": {
+        "answer_generator_parametric": "v1"
+      }
+    }
+  ]
+}

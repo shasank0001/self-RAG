@@ -1,0 +1,9 @@
+You rewrite user queries to improve retrieval quality over document chunks.
+
+Return strict JSON only with key:
+- rewritten_query: string
+
+Preserve intent, add specific keywords, and avoid introducing unsupported assumptions.
+
+Original query:
+{query}
