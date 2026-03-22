@@ -44,6 +44,17 @@ Envelope fields:
 
 ## Event Types
 
+- `thinking`
+  - Payload:
+    - `step_id`
+    - `node_name`
+    - `label`
+    - `status` (`started|completed|failed|skipped`)
+    - `detail`
+    - `attempt`
+    - optional `provider`
+    - optional `model`
+  - Emitted while the graph is running, before answer text tokens begin.
 - `token`
   - Payload: `{ "text": "chunk" }`
   - Emitted as small text chunks.
@@ -80,10 +91,11 @@ Envelope fields:
 
 Expected order for successful runs:
 
-1. zero or more `token`
-2. zero or more `heartbeat`
-3. one `citations`
-4. one `done`
+1. zero or more `thinking`
+2. zero or more `token`
+3. zero or more `heartbeat`
+4. one `citations`
+5. one `done`
 
 `done` is emitted exactly once on success.
 
@@ -95,17 +107,21 @@ Expected order for successful runs:
 ## Happy Path Example
 
 ```text
-event: token
+event: thinking
 id: 6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:1
-data: {"id":"6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:1","event":"token","data":{"text":"Grounded answer "},"ts":"2026-03-21T00:00:00+00:00"}
+data: {"id":"6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:1","event":"thinking","data":{"step_id":"retrieval_decision:1","node_name":"retrieval_decision","label":"Selecting retrieval mode","status":"completed","detail":"Selected grounded retrieval.","attempt":1},"ts":"2026-03-21T00:00:00+00:00"}
+
+event: token
+id: 6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:2
+data: {"id":"6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:2","event":"token","data":{"text":"Grounded answer "},"ts":"2026-03-21T00:00:00+00:00"}
 
 event: citations
-id: 6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:2
-data: {"id":"6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:2","event":"citations","data":{"citations":[{"item_name":"doc.txt","chunk_excerpt":"evidence","bin_title":"Knowledge","chunk_id":"chunk-1"}],"retrieval_mode":"grounded"},"ts":"2026-03-21T00:00:00+00:00"}
+id: 6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:3
+data: {"id":"6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:3","event":"citations","data":{"citations":[{"item_name":"doc.txt","chunk_excerpt":"evidence","bin_title":"Knowledge","chunk_id":"chunk-1"}],"retrieval_mode":"grounded"},"ts":"2026-03-21T00:00:00+00:00"}
 
 event: done
-id: 6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:3
-data: {"id":"6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:3","event":"done","data":{"message_id":"6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31","session_id":"57c4d0f7-38de-4aa6-8d5c-3f53a0afe4a2","content":"Grounded answer about policy obligations.","retrieval_mode":"grounded","citations":[{"item_name":"doc.txt","chunk_excerpt":"evidence","bin_title":"Knowledge","chunk_id":"chunk-1"}],"bin_ids_used":[],"provider_metadata":{},"prompt_versions":{}},"ts":"2026-03-21T00:00:00+00:00"}
+id: 6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:4
+data: {"id":"6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31:4","event":"done","data":{"message_id":"6e2b8f0f-6a8d-4c51-98ec-c2d84f10ed31","session_id":"57c4d0f7-38de-4aa6-8d5c-3f53a0afe4a2","content":"Grounded answer about policy obligations.","retrieval_mode":"grounded","citations":[{"item_name":"doc.txt","chunk_excerpt":"evidence","bin_title":"Knowledge","chunk_id":"chunk-1"}],"bin_ids_used":[],"provider_metadata":{"thinking_steps":[{"step_id":"retrieval_decision:1","node_name":"retrieval_decision","label":"Selecting retrieval mode","status":"completed","detail":"Selected grounded retrieval.","attempt":1,"ts":"2026-03-21T00:00:00+00:00"}]},"prompt_versions":{}},"ts":"2026-03-21T00:00:00+00:00"}
 
 ```
 

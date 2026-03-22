@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, AsyncIterator, Awaitable, Callable, cast
 
 from langgraph.graph import END, START, StateGraph
 
@@ -339,25 +339,17 @@ def _build_compiled_graph(runtime: GraphRuntime):
     return builder.compile()
 
 
-async def run_self_rag_graph(
-    *,
-    runtime: GraphRuntime,
-    user_query: str,
-    selected_bins: list[SelectedBin],
-) -> GraphExecutionResult:
+def _initial_graph_state(*, user_query: str, selected_bins: list[SelectedBin]) -> GraphState:
     selected_bin_ids = [item.id for item in selected_bins]
-    initial_state = GraphState(
+    return GraphState(
         user_query=user_query,
         selected_bins=selected_bins,
         selected_bin_ids=selected_bin_ids,
         bin_ids_used=selected_bin_ids,
     )
 
-    graph = _build_compiled_graph(runtime)
-    logger.info("graph.execution.started", extra={"bin_count": len(selected_bins)})
-    with start_span("graph.execution", attributes={"selected_bin_count": len(selected_bins)}):
-        result = await graph.ainvoke(initial_state)
-    final_state = GraphState.model_validate(result)
+
+def _finalize_graph_state(final_state: GraphState) -> None:
     if final_state.provider_trace:
         first_success = next((item for item in final_state.provider_trace if item.success), None)
         if first_success is not None:
@@ -375,4 +367,40 @@ async def run_self_rag_graph(
             "chosen_model": final_state.chosen_model,
         },
     )
+
+
+async def stream_self_rag_graph(
+    *,
+    runtime: GraphRuntime,
+    user_query: str,
+    selected_bins: list[SelectedBin],
+) -> AsyncIterator[tuple[str, Any]]:
+    initial_state = _initial_graph_state(user_query=user_query, selected_bins=selected_bins)
+    graph = _build_compiled_graph(runtime)
+    last_state_payload: dict[str, Any] | None = None
+
+    logger.info("graph.execution.started", extra={"bin_count": len(selected_bins)})
+    with start_span("graph.execution", attributes={"selected_bin_count": len(selected_bins)}):
+        async for item in graph.astream(initial_state, stream_mode=["tasks", "values"]):
+            if isinstance(item, tuple) and len(item) == 2 and item[0] == "values" and isinstance(item[1], dict):
+                last_state_payload = item[1]
+            yield item
+
+    if last_state_payload is not None:
+        _finalize_graph_state(GraphState.model_validate(last_state_payload))
+
+
+async def run_self_rag_graph(
+    *,
+    runtime: GraphRuntime,
+    user_query: str,
+    selected_bins: list[SelectedBin],
+) -> GraphExecutionResult:
+    initial_state = _initial_graph_state(user_query=user_query, selected_bins=selected_bins)
+    graph = _build_compiled_graph(runtime)
+    logger.info("graph.execution.started", extra={"bin_count": len(selected_bins)})
+    with start_span("graph.execution", attributes={"selected_bin_count": len(selected_bins)}):
+        result = await graph.ainvoke(initial_state)
+    final_state = GraphState.model_validate(result)
+    _finalize_graph_state(final_state)
     return GraphExecutionResult(state=final_state)

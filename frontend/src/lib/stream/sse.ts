@@ -124,5 +124,12 @@ export async function openSSE(
 }
 
 export function isKnownStreamEvent(name: string): name is StreamEventName {
-  return name === "token" || name === "citations" || name === "done" || name === "heartbeat" || name === "error";
+  return (
+    name === "thinking" ||
+    name === "token" ||
+    name === "citations" ||
+    name === "done" ||
+    name === "heartbeat" ||
+    name === "error"
+  );
 }

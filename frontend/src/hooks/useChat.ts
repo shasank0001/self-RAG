@@ -13,6 +13,7 @@ import type {
   SessionRecord,
   StreamDonePayload,
   StreamErrorPayload,
+  ThinkingStep,
 } from "@/types/chat";
 
 type SendMessageArgs = {
@@ -150,6 +151,22 @@ function normalizeCitations(value: MessageRecord["citations"]): Citation[] {
     return [];
   }
   return value.filter((item): item is Citation => typeof item === "object" && item !== null && "chunk_id" in item);
+}
+
+function normalizeThinkingSteps(value: unknown): ThinkingStep[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (item): item is ThinkingStep =>
+      typeof item === "object" &&
+      item !== null &&
+      "step_id" in item &&
+      "label" in item &&
+      "status" in item &&
+      "detail" in item,
+  );
 }
 
 function slugifyNamespacePart(value: string): string {
@@ -351,6 +368,7 @@ export function useChatStream() {
   const queryClient = useQueryClient();
   const { connect, cancel } = useSSE();
   const setStatus = useChatStore((state) => state.setStatus);
+  const upsertThinkingStep = useChatStore((state) => state.upsertThinkingStep);
   const appendDraft = useChatStore((state) => state.appendDraft);
   const setCitations = useChatStore((state) => state.setCitations);
   const markDone = useChatStore((state) => state.markDone);
@@ -404,6 +422,27 @@ export function useChatStream() {
         ]);
 
         setStatus("streaming");
+        const mockThinking: ThinkingStep[] = [
+          {
+            step_id: "retrieval_decision:1",
+            node_name: "retrieval_decision",
+            label: "Selecting retrieval mode",
+            status: "completed",
+            detail: "Selected grounded retrieval.",
+            attempt: 1,
+          },
+          {
+            step_id: "answer_generator:1",
+            node_name: "answer_generator",
+            label: "Drafting answer",
+            status: "completed",
+            detail: "Drafted a grounded answer.",
+            attempt: 1,
+          },
+        ];
+        for (const step of mockThinking) {
+          upsertThinkingStep(step, `mock:${Date.now()}`);
+        }
         const chunks = ["Sure, ", "here is ", "a mock ", "streamed ", "answer."];
         for (const chunk of chunks) {
           await new Promise((resolve) => setTimeout(resolve, 60));
@@ -426,7 +465,7 @@ export function useChatStream() {
               ]
             : [],
           bin_ids_used: binIds,
-          provider_metadata: { mocked: true },
+          provider_metadata: { mocked: true, thinking_steps: mockThinking },
           prompt_versions: { answer_generator: "v1" },
         };
         await applyDone(payload, `mock:${Date.now()}`);
@@ -443,6 +482,7 @@ export function useChatStream() {
           cursor: null,
           draftAssistantText: "",
           citations: [],
+          thinkingSteps: [],
           retryCount: 0,
           lastError: null,
         }));
@@ -475,6 +515,9 @@ export function useChatStream() {
               cursor: activeCursor ?? undefined,
             },
             {
+              onThinking: (payload, eventCursor) => {
+                upsertThinkingStep(payload, eventCursor);
+              },
               onToken: (payload, eventCursor) => {
                 appendDraft(payload.text, eventCursor);
               },
@@ -527,7 +570,7 @@ export function useChatStream() {
 
       await attemptConnect(0, cursor ?? null);
     },
-    [appendDraft, applyDone, connect, incrementRetry, markDone, markError, queryClient, setCitations, setStatus],
+    [appendDraft, applyDone, connect, incrementRetry, markDone, markError, queryClient, setCitations, setStatus, upsertThinkingStep],
   );
 
   const retryFromCursor = useCallback(
@@ -553,6 +596,7 @@ export function useChatStream() {
       status: "offline",
       draftAssistantText: "",
       citations: [],
+      thinkingSteps: [],
       retryCount: 0,
       lastError: null,
     }));
@@ -613,6 +657,7 @@ export function useMessageViewModel(messages: MessageRecord[] | undefined) {
     return (messages ?? []).map((message) => ({
       ...message,
       citationsNormalized: normalizeCitations(message.citations),
+      thinkingSteps: normalizeThinkingSteps((message.provider_metadata as { thinking_steps?: unknown } | null)?.thinking_steps),
     }));
   }, [messages]);
 }

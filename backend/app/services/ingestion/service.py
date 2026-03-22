@@ -5,26 +5,21 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from math import ceil
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.api.middleware.request_context import bind_request_context
 from app.core.config import Settings, get_settings
-from app.core.tracing import start_span
 from app.core.errors import BadRequestError, NotFoundError
-from app.observability.events import LogEvent
-from app.observability.metrics import get_metrics_registry
 from app.models.bin import Bin
 from app.models.ingestion_job import IngestionJob, IngestionStatus
 from app.models.item import Item, ItemSourceType
 from app.models.user import User
 from app.services.ingestion.chunking import build_chunks
-from app.services.ingestion.embeddings import EmbeddingProvider, build_embedding_provider, validate_embedding_dimensions
+from app.services.ingestion.embeddings import EmbeddingProvider, build_embedding_provider
 from app.services.ingestion.errors import IngestionError, ParserExecutionError
 from app.services.ingestion.metrics import get_ingestion_metrics_registry
 from app.services.ingestion.parsers import ParsePayload, ParserFactory
@@ -32,7 +27,6 @@ from app.services.ingestion.vector_index import VectorIndex, VectorPayload, buil
 
 logger = logging.getLogger(__name__)
 metrics = get_ingestion_metrics_registry()
-obs_metrics = get_metrics_registry()
 
 _ALLOWED_TRANSITIONS: dict[IngestionStatus, set[IngestionStatus]] = {
     IngestionStatus.QUEUED: {IngestionStatus.RUNNING},
@@ -140,7 +134,7 @@ async def queue_text_ingestion(
     await session.commit()
     await session.refresh(item)
     await session.refresh(job)
-    metrics.incr("queued", user_id=user.id)
+    metrics.incr("queued")
     return QueuedIngestionResult(item=item, job=job)
 
 
@@ -179,7 +173,7 @@ async def queue_upload_ingestion(
     await session.commit()
     await session.refresh(item)
     await session.refresh(job)
-    metrics.incr("queued", user_id=user.id)
+    metrics.incr("queued")
     return QueuedIngestionResult(item=item, job=job)
 
 
@@ -215,51 +209,13 @@ async def claim_next_queued_job(session: AsyncSession) -> UUID | None:
     _apply_transition(job, to_status=IngestionStatus.RUNNING, now=now)
     job.attempt_count += 1
     await session.commit()
-    metrics.incr("running", user_id=job.user_id)
+    metrics.incr("running")
     return job.id
-
-
-async def get_seconds_until_next_queued_job(session: AsyncSession) -> int | None:
-    now = datetime.now(UTC)
-    result = await session.execute(
-        select(func.min(IngestionJob.next_attempt_at)).where(IngestionJob.status == IngestionStatus.QUEUED)
-    )
-    next_attempt = result.scalar_one_or_none()
-    if next_attempt is None:
-        return None
-    if next_attempt <= now:
-        return 0
-    return max(1, ceil((next_attempt - now).total_seconds()))
-
-
-async def recover_running_jobs_after_restart(session: AsyncSession) -> int:
-    now = datetime.now(UTC)
-    result = await session.execute(
-        select(IngestionJob)
-        .where(IngestionJob.status == IngestionStatus.RUNNING)
-        .with_for_update(skip_locked=True)
-    )
-    running_jobs = list(result.scalars().all())
-    if not running_jobs:
-        return 0
-
-    for job in running_jobs:
-        _apply_transition(
-            job,
-            to_status=IngestionStatus.QUEUED,
-            now=now,
-            last_error=job.last_error,
-            next_attempt_at=now,
-        )
-        metrics.incr("recovered", user_id=job.user_id)
-
-    await session.commit()
-    return len(running_jobs)
 
 
 def _log_stage(job: IngestionJob, stage: str, duration_ms: float) -> None:
     logger.info(
-        LogEvent.INGESTION_STAGE_COMPLETED,
+        "ingestion stage completed",
         extra={
             "job_id": str(job.id),
             "item_id": str(job.item_id) if job.item_id else None,
@@ -268,12 +224,7 @@ def _log_stage(job: IngestionJob, stage: str, duration_ms: float) -> None:
             "duration_ms": round(duration_ms, 2),
         },
     )
-    obs_metrics.observe(
-        "selfrag_ingestion_stage_latency_ms",
-        duration_ms,
-        stage=stage,
-    )
-    metrics.observe_stage(stage, duration_ms, user_id=job.user_id)
+    metrics.observe_stage(stage, duration_ms)
 
 
 def _load_file_bytes(item: Item) -> bytes | None:
@@ -320,25 +271,17 @@ async def process_running_job(
     if job.bin is None:
         raise IngestionError(code="missing_bin", message="Ingestion job is missing linked bin", stage="orchestrator")
 
-    with bind_request_context(job_id=str(job.id), bin_id=str(job.bin_id)):
-        logger.info(
-            LogEvent.INGESTION_JOB_STARTED,
-            extra={"job_id": str(job.id), "bin_id": str(job.bin_id), "source_name": job.source_name},
-        )
-        obs_metrics.inc("selfrag_ingestion_jobs_total", status="running")
-
-        parse_start = time.perf_counter()
-        with start_span("ingestion.parse", attributes={"job_id": str(job.id), "source_type": job.item.source_type.value}):
-            payload = ParsePayload(
-                source_name=job.item.source_name,
-                source_type=job.item.source_type,
-                media_type=job.item.media_type,
-                raw_text=job.item.raw_text,
-                file_bytes=_load_file_bytes(job.item),
-            )
-            parser = ParserFactory.create_parser(payload)
-            parsed = parser.parse(payload)
-        _log_stage(job, "parse", (time.perf_counter() - parse_start) * 1000)
+    parse_start = time.perf_counter()
+    payload = ParsePayload(
+        source_name=job.item.source_name,
+        source_type=job.item.source_type,
+        media_type=job.item.media_type,
+        raw_text=job.item.raw_text,
+        file_bytes=_load_file_bytes(job.item),
+    )
+    parser = ParserFactory.create_parser(payload)
+    parsed = parser.parse(payload)
+    _log_stage(job, "parse", (time.perf_counter() - parse_start) * 1000)
 
     content_hash = sha256(parsed.normalized_text.encode("utf-8")).hexdigest()
     job.content_hash = content_hash
@@ -347,9 +290,7 @@ async def process_running_job(
         _apply_transition(job, to_status=IngestionStatus.SUCCEEDED, now=datetime.now(UTC))
         job.last_error = None
         await session.commit()
-        metrics.incr("succeeded", user_id=job.user_id)
-        obs_metrics.inc("selfrag_ingestion_jobs_total", status="succeeded")
-        logger.info(LogEvent.INGESTION_SUCCEEDED, extra={"job_id": str(job.id), "idempotency_skip": True})
+        metrics.incr("succeeded")
         _log_stage(job, "idempotency_skip", 0.0)
         return
 
@@ -362,7 +303,6 @@ async def process_running_job(
         source_type=job.item.source_type,
         content_hash=content_hash,
         settings=settings,
-        parser_metadata=parsed.metadata,
     )
     if not chunk_records:
         raise IngestionError(
@@ -381,34 +321,25 @@ async def process_running_job(
     embed_start = time.perf_counter()
     vector_payloads: list[VectorPayload] = []
     batch_size = max(1, settings.ingestion_batch_size)
-    with start_span("ingestion.embed", attributes={"job_id": str(job.id), "batch_size": batch_size}) as span:
-        for offset in range(0, len(chunk_records), batch_size):
-            batch = chunk_records[offset : offset + batch_size]
-            embeddings = await embedding_provider.embed([chunk.text for chunk in batch])
-            if len(embeddings) != len(batch):
-                raise IngestionError(
-                    code="embedding_count_mismatch",
-                    message="Embedding provider returned mismatched vector count",
-                    stage="embed",
-                    retriable=True,
-                )
-            provider_dimensions = getattr(embedding_provider, "dimensions", None)
-            if isinstance(provider_dimensions, int) and provider_dimensions > 0:
-                validate_embedding_dimensions(
-                    vectors=embeddings,
-                    expected_dimensions=provider_dimensions,
-                    stage="embed",
-                )
+    for offset in range(0, len(chunk_records), batch_size):
+        batch = chunk_records[offset : offset + batch_size]
+        embeddings = await embedding_provider.embed([chunk.text for chunk in batch])
+        if len(embeddings) != len(batch):
+            raise IngestionError(
+                code="embedding_count_mismatch",
+                message="Embedding provider returned mismatched vector count",
+                stage="embed",
+                retriable=True,
+            )
 
-            for chunk, embedding in zip(batch, embeddings):
-                vector_payloads.append(
-                    VectorPayload(
-                        id=chunk.chunk_id,
-                        values=embedding,
-                        metadata=chunk.metadata,
-                    )
+        for chunk, embedding in zip(batch, embeddings):
+            vector_payloads.append(
+                VectorPayload(
+                    id=chunk.chunk_id,
+                    values=embedding,
+                    metadata=chunk.metadata,
                 )
-        span.set_attribute("vector_count", len(vector_payloads))
+            )
     _log_stage(job, "embed", (time.perf_counter() - embed_start) * 1000)
 
     upsert_start = time.perf_counter()
@@ -422,41 +353,12 @@ async def process_running_job(
     now = datetime.now(UTC)
     job.item.content_hash = content_hash
     job.item.chunk_count = len(chunk_records)
-    job.item.embedding_provider = settings.embedding_provider
     job.item.embedding_model = embedding_provider.model_name
-    job.item.embedding_dimensions = len(vector_payloads[0].values) if vector_payloads else None
     job.item.last_ingested_at = now
-
-    if job.bin.embedding_provider is None:
-        job.bin.embedding_provider = settings.embedding_provider
-    if job.bin.embedding_model is None:
-        job.bin.embedding_model = embedding_provider.model_name
-    if job.bin.embedding_dimensions is None and vector_payloads:
-        job.bin.embedding_dimensions = len(vector_payloads[0].values)
-
-    if (
-        job.bin.embedding_provider not in {None, settings.embedding_provider}
-        or job.bin.embedding_model not in {None, embedding_provider.model_name}
-        or (
-            job.bin.embedding_dimensions is not None
-            and vector_payloads
-            and job.bin.embedding_dimensions != len(vector_payloads[0].values)
-        )
-    ):
-        raise IngestionError(
-            code="embedding_alignment_mismatch",
-            message="Bin embedding configuration does not match current ingestion embedding settings",
-            stage="embed",
-            retriable=False,
-        )
-
     _apply_transition(job, to_status=IngestionStatus.SUCCEEDED, now=now, last_error=None)
 
     await session.commit()
-    metrics.incr("succeeded", user_id=job.user_id)
-    obs_metrics.inc("selfrag_ingestion_jobs_total", status="succeeded")
-    obs_metrics.observe("selfrag_ingestion_chunks_per_job", float(len(chunk_records)))
-    logger.info(LogEvent.INGESTION_SUCCEEDED, extra={"job_id": str(job.id), "chunk_count": len(chunk_records)})
+    metrics.incr("succeeded")
 
 
 async def handle_job_failure(
@@ -492,9 +394,9 @@ async def handle_job_failure(
             next_attempt_at=next_attempt,
         )
         await session.commit()
-        metrics.incr("retries", user_id=job.user_id)
+        metrics.incr("retries")
         logger.warning(
-            LogEvent.INGESTION_RETRY_SCHEDULED,
+            "ingestion job scheduled for retry",
             extra={
                 "job_id": str(job.id),
                 "item_id": str(job.item_id) if job.item_id else None,
@@ -503,12 +405,11 @@ async def handle_job_failure(
                 "attempt_count": job.attempt_count,
             },
         )
-        obs_metrics.inc("selfrag_ingestion_jobs_total", status="requeued")
         return FailureAction(requeued=True, retry_delay_seconds=retry_delay)
 
     _apply_transition(job, to_status=IngestionStatus.FAILED, now=now, last_error=message)
     await session.commit()
-    metrics.incr("failed", user_id=job.user_id)
+    metrics.incr("failed")
     metrics.add_failure(
         {
             "job_id": str(job.id),
@@ -518,12 +419,11 @@ async def handle_job_failure(
             "attempt_count": job.attempt_count,
             "max_attempts": job.max_attempts,
             "failed_at": now.isoformat(),
-        },
-        user_id=job.user_id,
+        }
     )
 
     logger.error(
-        LogEvent.INGESTION_FAILED,
+        "ingestion job failed terminally",
         extra={
             "job_id": str(job.id),
             "item_id": str(job.item_id) if job.item_id else None,
@@ -532,7 +432,6 @@ async def handle_job_failure(
             "max_attempts": job.max_attempts,
         },
     )
-    obs_metrics.inc("selfrag_ingestion_jobs_total", status="failed")
     return FailureAction(requeued=False, retry_delay_seconds=None)
 
 

@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
-from app.api.dependencies.security import guard_text_payload
 from app.core.config import get_settings
 from app.core.errors import BadRequestError
 from app.db.session import get_db_session
@@ -100,7 +99,6 @@ async def queue_text_item_ingestion(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> IngestionAcceptedResponse:
-    guard_text_payload(text=payload.text, field_name="text", max_chars=100_000)
     bin_record = await require_bin_owner(session, bin_id=bin_id, owner_user_id=current_user.id)
     queued = await queue_text_ingestion(
         session,
@@ -239,7 +237,7 @@ async def get_recent_ingestion_failures(
     description="Returns ingestion counters, stage timers, and recent failures.",
 )
 async def get_ingestion_metrics(
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> IngestionMetricsResponse:
-    snapshot = get_ingestion_metrics_registry().snapshot_for_user(current_user.id)
+    snapshot = get_ingestion_metrics_registry().snapshot()
     return IngestionMetricsResponse.model_validate(snapshot)

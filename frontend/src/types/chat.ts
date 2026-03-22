@@ -42,6 +42,20 @@ export type Citation = {
   score?: number | null;
 };
 
+export type ThinkingStatus = "started" | "completed" | "failed" | "skipped";
+
+export type ThinkingStep = {
+  step_id: string;
+  node_name: string;
+  label: string;
+  status: ThinkingStatus;
+  detail: string;
+  attempt: number;
+  provider?: string | null;
+  model?: string | null;
+  ts?: string;
+};
+
 export type SessionRecord = {
   id: string;
   user_id: string;
@@ -80,6 +94,8 @@ export type StreamErrorPayload = {
   details?: Record<string, unknown>;
 };
 
+export type StreamThinkingPayload = ThinkingStep;
+
 export type StreamEnvelope<T = Record<string, unknown>> = {
   id: string;
   event: string;
@@ -87,7 +103,7 @@ export type StreamEnvelope<T = Record<string, unknown>> = {
   ts: string;
 };
 
-export type StreamEventName = "token" | "citations" | "done" | "heartbeat" | "error";
+export type StreamEventName = "thinking" | "token" | "citations" | "done" | "heartbeat" | "error";
 
 export type SessionListItem = {
   id: string;

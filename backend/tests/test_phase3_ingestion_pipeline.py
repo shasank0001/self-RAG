@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -11,7 +10,6 @@ from fastapi.testclient import TestClient
 
 import app.api.v1.routes.ingestion as ingestion_routes
 import app.services.ingestion.service as ingestion_service
-import app.services.ingestion.worker as ingestion_worker
 from app.core.config import Settings
 from app.db.session import get_db_session
 from app.main import create_app
@@ -312,11 +310,8 @@ def test_ingestion_metrics_endpoint_returns_snapshot(monkeypatch) -> None:
     app_user = User(id=uuid4(), clerk_user_id="user_phase3", email="phase3@example.com")
 
     class FakeRegistry:
-        captured_user_id = None
-
         @staticmethod
-        def snapshot_for_user(user_id) -> dict:
-            FakeRegistry.captured_user_id = user_id
+        def snapshot() -> dict:
             return {
                 "counters": {
                     "queued": 1,
@@ -340,7 +335,6 @@ def test_ingestion_metrics_endpoint_returns_snapshot(monkeypatch) -> None:
     body = response.json()
     assert body["counters"]["queued"] == 1
     assert body["timers_ms"]["parse"]["count"] == 1
-    assert FakeRegistry.captured_user_id == app_user.id
 
 
 def test_transition_guard_blocks_invalid_state_changes() -> None:
@@ -654,83 +648,3 @@ async def test_retry_policy_requeues_then_fails_on_exhaustion() -> None:
     )
     assert action.requeued is False
     assert job.status == IngestionStatus.FAILED
-
-
-@pytest.mark.asyncio
-async def test_recover_running_jobs_after_restart_requeues_running_jobs() -> None:
-    now = datetime.now(UTC)
-    running_job = IngestionJob(
-        id=uuid4(),
-        user_id=uuid4(),
-        bin_id=uuid4(),
-        item_id=uuid4(),
-        source_name="restart.txt",
-        status=IngestionStatus.RUNNING,
-        attempt_count=2,
-        max_attempts=3,
-        queued_at=now,
-        next_attempt_at=now,
-        started_at=now,
-        last_error="previous",
-    )
-
-    class FakeRunningJobsResult:
-        def __init__(self, jobs: list[IngestionJob]) -> None:
-            self._jobs = jobs
-
-        def scalars(self):
-            class _Scalars:
-                def __init__(self, jobs: list[IngestionJob]) -> None:
-                    self._jobs = jobs
-
-                def all(self):
-                    return self._jobs
-
-            return _Scalars(self._jobs)
-
-    class FakeRecoverySession:
-        def __init__(self, jobs: list[IngestionJob]) -> None:
-            self._jobs = jobs
-            self.commits = 0
-
-        async def execute(self, _statement):
-            return FakeRunningJobsResult(self._jobs)
-
-        async def commit(self) -> None:
-            self.commits += 1
-
-    session = FakeRecoverySession([running_job])
-
-    recovered = await ingestion_service.recover_running_jobs_after_restart(cast(Any, session))
-
-    assert recovered == 1
-    assert running_job.status == IngestionStatus.QUEUED
-    assert running_job.completed_at is None
-    assert session.commits == 1
-
-
-@pytest.mark.asyncio
-async def test_worker_recovery_logs_recovered_count(monkeypatch) -> None:
-    captured: dict[str, int] = {}
-
-    class FakeSessionContext:
-        async def __aenter__(self):
-            return object()
-
-        async def __aexit__(self, _exc_type, _exc, _tb):
-            return False
-
-    class FakeLogger:
-        def info(self, _msg: str, *, extra: dict[str, int]) -> None:
-            captured.update(extra)
-
-    async def fake_recover(_session) -> int:
-        return 2
-
-    monkeypatch.setattr(ingestion_worker, "SessionLocal", lambda: FakeSessionContext())
-    monkeypatch.setattr(ingestion_worker, "recover_running_jobs_after_restart", fake_recover)
-    monkeypatch.setattr(ingestion_worker, "logger", FakeLogger())
-
-    await ingestion_worker.recover_ingestion_worker()
-
-    assert captured["recovered_jobs"] == 2

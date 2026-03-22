@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import type { Citation, StreamDonePayload, StreamErrorPayload } from "@/types/chat";
+import type { Citation, StreamDonePayload, StreamErrorPayload, ThinkingStep } from "@/types/chat";
 
 export type ConnectionStatus = "idle" | "connecting" | "streaming" | "reconnecting" | "offline" | "error";
 
@@ -10,11 +10,13 @@ type ChatStore = {
   draftAssistantText: string;
   cursor: string | null;
   citations: Citation[];
+  thinkingSteps: ThinkingStep[];
   retryCount: number;
   lastError: StreamErrorPayload | null;
   activeSessionId: string | null;
   setStatus: (status: ConnectionStatus) => void;
   setActiveSession: (sessionId: string | null) => void;
+  upsertThinkingStep: (step: ThinkingStep, cursor: string | null) => void;
   appendDraft: (chunk: string, cursor: string | null) => void;
   setCitations: (citations: Citation[], cursor: string | null) => void;
   markDone: (payload: StreamDonePayload, cursor: string | null) => void;
@@ -28,6 +30,7 @@ const initialTransient = {
   draftAssistantText: "",
   cursor: null as string | null,
   citations: [] as Citation[],
+  thinkingSteps: [] as ThinkingStep[],
   retryCount: 0,
   lastError: null as StreamErrorPayload | null,
 };
@@ -39,6 +42,21 @@ export const useChatStore = create<ChatStore>()(
       activeSessionId: null,
       setStatus: (status) => set({ status }),
       setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
+      upsertThinkingStep: (step, cursor) =>
+        set((state) => {
+          const index = state.thinkingSteps.findIndex((item) => item.step_id === step.step_id);
+          const thinkingSteps =
+            index >= 0
+              ? state.thinkingSteps.map((item, itemIndex) => (itemIndex === index ? { ...item, ...step } : item))
+              : [...state.thinkingSteps, step];
+
+          return {
+            thinkingSteps,
+            cursor: cursor ?? state.cursor,
+            status: "streaming",
+            lastError: null,
+          };
+        }),
       appendDraft: (chunk, cursor) =>
         set((state) => ({
           draftAssistantText: `${state.draftAssistantText}${chunk}`,
@@ -57,6 +75,7 @@ export const useChatStore = create<ChatStore>()(
           status: "idle",
           draftAssistantText: "",
           citations: [],
+          thinkingSteps: [],
           cursor: cursor ?? state.cursor,
           retryCount: 0,
           lastError: null,

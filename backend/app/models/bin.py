@@ -26,9 +26,6 @@ class Bin(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     vector_namespace: Mapped[str] = mapped_column(String(255), nullable=False)
-    embedding_provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    embedding_dimensions: Mapped[int | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

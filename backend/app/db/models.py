@@ -1,4 +1,4 @@
-from app.models import Bin, ChatMessage, ChatSession, IngestionJob, Item, TelemetryEvent, UsageRollup, User, WebhookEvent
+from app.models import Bin, ChatMessage, ChatSession, IngestionJob, Item, TelemetryEvent, User, WebhookEvent
 
 __all__ = [
     "User",
@@ -8,6 +8,5 @@ __all__ = [
     "ChatSession",
     "ChatMessage",
     "TelemetryEvent",
-    "UsageRollup",
     "WebhookEvent",
 ]

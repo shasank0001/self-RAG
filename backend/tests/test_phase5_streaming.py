@@ -9,11 +9,9 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.pipeline.graph import GraphExecutionResult
-from app.pipeline.state import Citation, GraphState, ProviderTraceEntry, RetrievalMode
+from app.pipeline.state import Citation, GraphState, NodeOutcome, ProviderTraceEntry, RetrievalMode
 from app.models.chat_session import ChatSession
 from app.models.user import User
-from app.services import chat_service
 
 
 class FakeSession:
@@ -100,58 +98,131 @@ async def test_stream_endpoint_emits_token_citations_done(monkeypatch) -> None:
         assert owner_user_id == user.id
         return chat_session_record
 
-    async def fake_list_owned_bins(_session, *, owner_user_id, bin_ids):
-        assert owner_user_id == user.id
-        return [
-            SimpleNamespace(
-                id=selected_bin_id,
-                title="Knowledge",
-                vector_namespace="ns-knowledge",
-                embedding_provider="deterministic",
-                embedding_model="deterministic-v1",
-                embedding_dimensions=64,
+    graph_state = GraphState(
+        user_query="What is in my docs?",
+        selected_bins=[],
+        selected_bin_ids=[selected_bin_id],
+        bin_ids_used=[selected_bin_id],
+        retrieval_mode=RetrievalMode.GROUNDED,
+        final_answer="Grounded answer about policy obligations.",
+        citations=[
+            Citation(
+                item_name="doc.txt",
+                chunk_excerpt="evidence",
+                bin_title="Knowledge",
+                chunk_id="chunk-1",
+                score=0.92,
             )
-        ]
+        ],
+        chosen_provider="openrouter",
+        chosen_model="model-x",
+        provider_trace=[
+            ProviderTraceEntry(
+                node_name="answer_generator",
+                provider="openrouter",
+                model="model-x",
+                attempt=1,
+                success=True,
+                duration_ms=5.0,
+            )
+        ],
+        prompt_versions={"answer_generator": "v1"},
+        edge_transitions=["retrieval_decision:retrieve", "answer_generator:grounded"],
+        next_step=NodeOutcome.REGENERATE,
+    )
 
-    async def fake_run_graph(*, runtime, user_query, selected_bins):
-        return GraphExecutionResult(
-            state=GraphState(
-                user_query=user_query,
-                selected_bins=selected_bins,
-                selected_bin_ids=[selected_bin_id],
-                bin_ids_used=[selected_bin_id],
-                retrieval_mode=RetrievalMode.GROUNDED,
-                final_answer="Grounded answer about policy obligations.",
-                citations=[
-                    Citation(
-                        item_name="doc.txt",
-                        chunk_excerpt="evidence",
-                        bin_title="Knowledge",
-                        chunk_id="chunk-1",
-                        score=0.92,
-                    )
-                ],
-                chosen_provider="openrouter",
-                chosen_model="model-x",
-                provider_trace=[
-                    ProviderTraceEntry(
-                        node_name="answer_generator",
-                        provider="openrouter",
-                        model="model-x",
-                        attempt=1,
-                        success=True,
-                        duration_ms=5.0,
-                    )
-                ],
-                prompt_versions={"answer_generator": "v1"},
-                edge_transitions=["retrieval_decision:retrieve", "answer_generator:grounded"],
-            )
+    async def fake_prepare_chat_turn(_session, *, current_user, session_id, user_message, active_bin_ids=None, runtime=None):
+        assert current_user.id == user.id
+        assert session_id == chat_session_record.id
+        assert active_bin_ids == [selected_bin_id]
+        return SimpleNamespace(
+            chat_session=chat_session_record,
+            graph_runtime=object(),
+            selected_bin_ids=[selected_bin_id],
+            selected_bins=[
+                SimpleNamespace(
+                    id=selected_bin_id,
+                    title="Knowledge",
+                    vector_namespace="ns-knowledge",
+                    embedding_provider="deterministic",
+                    embedding_model="deterministic-v1",
+                    embedding_dimensions=64,
+                )
+            ],
         )
 
-    monkeypatch.setattr(chat_service, "require_session_owner", fake_require_session_owner)
-    monkeypatch.setattr(chat_service, "list_owned_bins", fake_list_owned_bins)
-    monkeypatch.setattr(chat_service, "run_self_rag_graph", fake_run_graph)
+    async def fake_stream_graph(*, runtime, user_query, selected_bins):
+        yield (
+            "tasks",
+            {
+                "id": "task-1",
+                "name": "retrieval_decision",
+                "input": {"user_query": user_query},
+            },
+        )
+        yield (
+            "tasks",
+            {
+                "id": "task-1",
+                "name": "retrieval_decision",
+                "result": {"next_step": NodeOutcome.RETRIEVE},
+                "error": None,
+            },
+        )
+        yield (
+            "tasks",
+            {
+                "id": "task-2",
+                "name": "answer_generator",
+                "input": {"query": user_query},
+            },
+        )
+        yield (
+            "tasks",
+            {
+                "id": "task-2",
+                "name": "answer_generator",
+                "result": {
+                    "retrieval_mode": RetrievalMode.GROUNDED,
+                    "provider_trace": [item.model_dump(mode="json") for item in graph_state.provider_trace],
+                },
+                "error": None,
+            },
+        )
+        yield ("values", graph_state.model_dump(mode="json"))
+
+    async def fake_persist_chat_turn_result(
+        _session,
+        *,
+        current_user,
+        session_id,
+        prepared_turn,
+        graph_state,
+        assistant_message_id=None,
+        thinking_steps=None,
+        stream_events=None,
+    ):
+        from app.models.chat_message import ChatMessage
+
+        assistant = ChatMessage(
+            id=assistant_message_id or uuid4(),
+            session_id=session_id,
+            user_id=current_user.id,
+            role=MessageRole.ASSISTANT,
+            content=graph_state.final_answer or "",
+            retrieval_mode=RetrievalMode.GROUNDED,
+            citations=[item.model_dump(mode="json") for item in graph_state.citations],
+            bin_ids_used=[selected_bin_id],
+            provider_metadata={"thinking_steps": thinking_steps or [], "stream": {"events": stream_events or []}},
+            prompt_versions=graph_state.prompt_versions,
+        )
+        fake_session.add(assistant)
+        return SimpleNamespace(assistant_message=assistant, graph_state=graph_state)
+
     monkeypatch.setattr(chat_routes, "require_session_owner", fake_require_session_owner)
+    monkeypatch.setattr(chat_routes, "prepare_chat_turn", fake_prepare_chat_turn)
+    monkeypatch.setattr(chat_routes, "stream_self_rag_graph", fake_stream_graph)
+    monkeypatch.setattr(chat_routes, "persist_chat_turn_result", fake_persist_chat_turn_result)
 
     payload = chat_routes.ChatTurnRequest(message="What is in my docs?", bin_ids=[selected_bin_id])
     response = await chat_routes.create_chat_turn(
@@ -167,12 +238,13 @@ async def test_stream_endpoint_emits_token_citations_done(monkeypatch) -> None:
         chunks.append(_coerce_sse_chunk(part))
 
     text = "".join(chunks)
+    assert "event: thinking" in text
     assert "event: token" in text
     assert "event: citations" in text
     assert "event: done" in text
     assert "event: error" not in text
     event_names = _event_names_from_sse(text)
-    assert event_names[0] == "token"
+    assert event_names[0] == "thinking"
     assert event_names[-2:] == ["citations", "done"]
 
 
@@ -196,39 +268,83 @@ async def test_stream_emits_heartbeat_on_long_responses(monkeypatch) -> None:
     async def fake_require_session_owner(_session, *, session_id, owner_user_id):
         return chat_session_record
 
-    async def fake_list_owned_bins(_session, *, owner_user_id, bin_ids):
-        return [
-            SimpleNamespace(
-                id=selected_bin_id,
-                title="Knowledge",
-                vector_namespace="ns-knowledge",
-                embedding_provider="deterministic",
-                embedding_model="deterministic-v1",
-                embedding_dimensions=64,
-            )
-        ]
+    graph_state = GraphState(
+        user_query="What is in my docs?",
+        selected_bins=[],
+        selected_bin_ids=[selected_bin_id],
+        bin_ids_used=[selected_bin_id],
+        retrieval_mode=RetrievalMode.GROUNDED,
+        final_answer=" ".join(["chunk"] * 60),
+        citations=[],
+        chosen_provider="openrouter",
+        chosen_model="model-x",
+        provider_trace=[],
+        prompt_versions={"answer_generator": "v1"},
+        next_step=NodeOutcome.REGENERATE,
+    )
 
-    async def fake_run_graph(*, runtime, user_query, selected_bins):
-        return GraphExecutionResult(
-            state=GraphState(
-                user_query=user_query,
-                selected_bins=selected_bins,
-                selected_bin_ids=[selected_bin_id],
-                bin_ids_used=[selected_bin_id],
-                retrieval_mode=RetrievalMode.GROUNDED,
-                final_answer=" ".join(["chunk"] * 60),
-                citations=[],
-                chosen_provider="openrouter",
-                chosen_model="model-x",
-                provider_trace=[],
-                prompt_versions={"answer_generator": "v1"},
-            )
+    async def fake_prepare_chat_turn(_session, *, current_user, session_id, user_message, active_bin_ids=None, runtime=None):
+        return SimpleNamespace(
+            chat_session=chat_session_record,
+            graph_runtime=object(),
+            selected_bin_ids=[selected_bin_id],
+            selected_bins=[
+                SimpleNamespace(
+                    id=selected_bin_id,
+                    title="Knowledge",
+                    vector_namespace="ns-knowledge",
+                    embedding_provider="deterministic",
+                    embedding_model="deterministic-v1",
+                    embedding_dimensions=64,
+                )
+            ],
         )
 
-    monkeypatch.setattr(chat_service, "require_session_owner", fake_require_session_owner)
-    monkeypatch.setattr(chat_service, "list_owned_bins", fake_list_owned_bins)
-    monkeypatch.setattr(chat_service, "run_self_rag_graph", fake_run_graph)
+    async def fake_stream_graph(*, runtime, user_query, selected_bins):
+        yield ("tasks", {"id": "task-1", "name": "answer_generator", "input": {"query": user_query}})
+        yield (
+            "tasks",
+            {
+                "id": "task-1",
+                "name": "answer_generator",
+                "result": {"retrieval_mode": RetrievalMode.GROUNDED},
+                "error": None,
+            },
+        )
+        yield ("values", graph_state.model_dump(mode="json"))
+
+    async def fake_persist_chat_turn_result(
+        _session,
+        *,
+        current_user,
+        session_id,
+        prepared_turn,
+        graph_state,
+        assistant_message_id=None,
+        thinking_steps=None,
+        stream_events=None,
+    ):
+        from app.models.chat_message import ChatMessage
+
+        assistant = ChatMessage(
+            id=assistant_message_id or uuid4(),
+            session_id=session_id,
+            user_id=current_user.id,
+            role=MessageRole.ASSISTANT,
+            content=graph_state.final_answer or "",
+            retrieval_mode=RetrievalMode.GROUNDED,
+            citations=[],
+            bin_ids_used=[selected_bin_id],
+            provider_metadata={"thinking_steps": thinking_steps or [], "stream": {"events": stream_events or []}},
+            prompt_versions=graph_state.prompt_versions,
+        )
+        fake_session.add(assistant)
+        return SimpleNamespace(assistant_message=assistant, graph_state=graph_state)
+
     monkeypatch.setattr(chat_routes, "require_session_owner", fake_require_session_owner)
+    monkeypatch.setattr(chat_routes, "prepare_chat_turn", fake_prepare_chat_turn)
+    monkeypatch.setattr(chat_routes, "stream_self_rag_graph", fake_stream_graph)
+    monkeypatch.setattr(chat_routes, "persist_chat_turn_result", fake_persist_chat_turn_result)
     monkeypatch.setattr(chat_routes, "get_settings", lambda: SimpleNamespace(chat_stream_heartbeat_interval_ms=250))
 
     payload = chat_routes.ChatTurnRequest(message="What is in my docs?", bin_ids=[selected_bin_id])
@@ -462,8 +578,53 @@ def test_stream_endpoint_accepts_valid_authentication(monkeypatch) -> None:
     async def fake_require_session_owner(_session, *, session_id, owner_user_id):
         return session_record
 
-    async def fake_run_chat_turn(_session, *, current_user, session_id, user_message, active_bin_ids=None, runtime=None):
+    async def fake_prepare_chat_turn(_session, *, current_user, session_id, user_message, active_bin_ids=None, runtime=None):
+        return SimpleNamespace(
+            chat_session=session_record,
+            graph_runtime=object(),
+            selected_bin_ids=[],
+            selected_bins=[],
+        )
+
+    async def fake_stream_graph(*, runtime, user_query, selected_bins):
+        yield ("tasks", {"id": "task-1", "name": "answer_generator", "input": {"query": user_query}})
+        yield (
+            "tasks",
+            {
+                "id": "task-1",
+                "name": "answer_generator",
+                "result": {"retrieval_mode": RetrievalMode.PARAMETRIC},
+                "error": None,
+            },
+        )
+        yield (
+            "values",
+            GraphState(
+                user_query=user_query,
+                selected_bins=[],
+                selected_bin_ids=[],
+                bin_ids_used=[],
+                retrieval_mode=RetrievalMode.PARAMETRIC,
+                final_answer="hello from assistant",
+                citations=[],
+                prompt_versions={},
+                next_step=NodeOutcome.GENERATE,
+            ).model_dump(mode="json"),
+        )
+
+    async def fake_persist_chat_turn_result(
+        _session,
+        *,
+        current_user,
+        session_id,
+        prepared_turn,
+        graph_state,
+        assistant_message_id=None,
+        thinking_steps=None,
+        stream_events=None,
+    ):
         assistant = ChatMessage(
+            id=assistant_message_id or uuid4(),
             session_id=session_record.id,
             user_id=user.id,
             role=MessageRole.ASSISTANT,
@@ -471,14 +632,16 @@ def test_stream_endpoint_accepts_valid_authentication(monkeypatch) -> None:
             retrieval_mode=RetrievalMode.PARAMETRIC,
             citations=[],
             bin_ids_used=[],
-            provider_metadata={},
+            provider_metadata={"thinking_steps": thinking_steps or [], "stream": {"events": stream_events or []}},
             prompt_versions={},
         )
         fake_db.add(assistant)
-        return SimpleNamespace(assistant_message=assistant)
+        return SimpleNamespace(assistant_message=assistant, graph_state=graph_state)
 
     monkeypatch.setattr(chat_routes, "require_session_owner", fake_require_session_owner)
-    monkeypatch.setattr(chat_routes, "run_chat_turn", fake_run_chat_turn)
+    monkeypatch.setattr(chat_routes, "prepare_chat_turn", fake_prepare_chat_turn)
+    monkeypatch.setattr(chat_routes, "stream_self_rag_graph", fake_stream_graph)
+    monkeypatch.setattr(chat_routes, "persist_chat_turn_result", fake_persist_chat_turn_result)
 
     app = create_app()
     app.dependency_overrides[get_db_session] = override_db_session

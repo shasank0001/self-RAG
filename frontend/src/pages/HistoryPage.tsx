@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { CitationPanel } from "@/components/CitationPanel";
 import { RetrievalModeBadge } from "@/components/RetrievalModeBadge";
+import { ThinkingPanel } from "@/components/ThinkingPanel";
 import { useDeleteSession, useHistoryList, useMessageViewModel, useSessionMessages } from "@/hooks/useChat";
 
 export function HistoryPage() {
@@ -62,6 +63,7 @@ export function HistoryPage() {
                     {message.role === "assistant" ? <RetrievalModeBadge mode={message.retrieval_mode} /> : null}
                   </header>
                   <p>{message.content}</p>
+                  {message.role === "assistant" ? <ThinkingPanel steps={message.thinkingSteps} /> : null}
                   {message.role === "assistant" ? <CitationPanel citations={message.citationsNormalized} /> : null}
                 </article>
               ))}

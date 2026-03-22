@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { BinPicker } from "@/components/BinPicker";
 import { CitationPanel } from "@/components/CitationPanel";
 import { RetrievalModeBadge } from "@/components/RetrievalModeBadge";
+import { ThinkingPanel } from "@/components/ThinkingPanel";
 import {
   toStreamError,
   useBins,
@@ -36,6 +37,7 @@ export function ChatPage() {
   const status = useChatStore((state) => state.status);
   const draftAssistantText = useChatStore((state) => state.draftAssistantText);
   const streamCitations = useChatStore((state) => state.citations);
+  const streamThinkingSteps = useChatStore((state) => state.thinkingSteps);
   const lastError = useChatStore((state) => state.lastError);
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const setActiveSession = useChatStore((state) => state.setActiveSession);
@@ -86,7 +88,7 @@ export function ChatPage() {
     }
 
     messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
-  }, [draftAssistantText, messages.length]);
+  }, [draftAssistantText, messages.length, streamThinkingSteps.length]);
 
   const onSelectBins = async (next: string[]) => {
     setSelectedBinIds(next);
@@ -168,7 +170,10 @@ export function ChatPage() {
             New chat
           </Link>
         </div>
-        <p className="connection-banner">{connectionLabel}</p>
+        <section className="chat-sidebar-section">
+          <p className="chat-sidebar-label">Session status</p>
+          <p className="connection-banner">{connectionLabel}</p>
+        </section>
         {lastError ? (
           <div className="stream-error">
             <strong>{lastError.code}</strong>
@@ -180,21 +185,42 @@ export function ChatPage() {
             ) : null}
           </div>
         ) : null}
-        <BinPicker
-          bins={(binsQuery.data ?? []).map((bin) => ({ id: bin.id, title: bin.title, description: bin.description }))}
-          selectedBinIds={selectedBinIds}
-          onChange={(next) => {
-            void onSelectBins(next);
-          }}
-          disabled={status === "connecting" || status === "streaming" || status === "reconnecting"}
-        />
-        <Link to="/history" className="history-link">
-          Open history
-        </Link>
+        <section className="chat-sidebar-section">
+          <div className="chat-sidebar-section-heading">
+            <div>
+              <p className="chat-sidebar-label">Knowledge context</p>
+              <h3>Active bins</h3>
+            </div>
+            <Link to="/history" className="history-link">
+              History
+            </Link>
+          </div>
+          <BinPicker
+            bins={(binsQuery.data ?? []).map((bin) => ({ id: bin.id, title: bin.title, description: bin.description }))}
+            selectedBinIds={selectedBinIds}
+            onChange={(next) => {
+              void onSelectBins(next);
+            }}
+            disabled={status === "connecting" || status === "streaming" || status === "reconnecting"}
+          />
+        </section>
       </aside>
 
       <main className="chat-main">
+        {sessionQuery.data?.title ? (
+          <header className="chat-thread-header">
+            <p className="chat-thread-kicker">Conversation</p>
+            <h3>{sessionQuery.data.title}</h3>
+          </header>
+        ) : null}
         <div ref={messageListRef} className="message-list" onScroll={onTranscriptScroll}>
+          {messages.length === 0 && !draftAssistantText && streamThinkingSteps.length === 0 ? (
+            <section className="chat-empty-state">
+              <p className="chat-empty-kicker">Ready when you are</p>
+              <h4>Start with a direct question.</h4>
+              <p>Use selected bins for grounded answers, or leave them empty for parametric mode.</p>
+            </section>
+          ) : null}
           {messages.map((message) => (
             <article
               key={message.id}
@@ -205,17 +231,19 @@ export function ChatPage() {
                 {message.role === "assistant" ? <RetrievalModeBadge mode={message.retrieval_mode} /> : null}
               </header>
               <p>{message.content}</p>
+              {message.role === "assistant" ? <ThinkingPanel steps={message.thinkingSteps} /> : null}
               {message.role === "assistant" ? <CitationPanel citations={message.citationsNormalized} /> : null}
             </article>
           ))}
 
-          {draftAssistantText ? (
+          {draftAssistantText || streamThinkingSteps.length > 0 ? (
             <article className="message-row is-assistant is-draft">
               <header className="message-meta">
                 <strong>Assistant</strong>
                 <RetrievalModeBadge mode={streamCitations.length ? "grounded" : "parametric"} />
               </header>
-              <p>{draftAssistantText}</p>
+              <ThinkingPanel steps={streamThinkingSteps} isStreaming />
+              {draftAssistantText ? <p>{draftAssistantText}</p> : null}
               <CitationPanel citations={streamCitations} />
             </article>
           ) : null}
@@ -237,7 +265,10 @@ export function ChatPage() {
               Cancel
             </button>
           </div>
-          {activeSessionId ? <small>Active session: {activeSessionId}</small> : null}
+          <div className="composer-meta">
+            <small>{selectedBinIds.length > 0 ? `${selectedBinIds.length} bins selected` : "No bins selected"}</small>
+            {activeSessionId ? <small>Saved to history</small> : <small>Starts a new session on send</small>}
+          </div>
         </footer>
       </main>
     </section>

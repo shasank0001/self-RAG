@@ -108,7 +108,6 @@ def build_chunks(
             "chunk_index": index,
             "chunk_id": chunk_id,
             "content_hash": content_hash,
-            "chunk_text": chunk_text,
         }
         if parser_metadata:
             for key, value in parser_metadata.items():

@@ -7,9 +7,11 @@ import type {
   StreamEnvelope,
   StreamErrorPayload,
   StreamEventName,
+  StreamThinkingPayload,
 } from "@/types/chat";
 
 type SSEHandlerMap = {
+  onThinking?: (payload: StreamThinkingPayload, cursor: string) => void;
   onToken?: (payload: { text: string }, cursor: string) => void;
   onCitations?: (payload: { citations: Citation[]; retrieval_mode: string }, cursor: string) => void;
   onDone?: (payload: StreamDonePayload, cursor: string) => void;
@@ -57,6 +59,11 @@ export function useSSE() {
             }
 
             const knownEvent = event.event as StreamEventName;
+            if (knownEvent === "thinking") {
+              const envelope = decodeStreamEnvelope<StreamThinkingPayload>(event);
+              handlers.onThinking?.(envelope.data, envelope.id);
+              return;
+            }
             if (knownEvent === "token") {
               const envelope = parseEnvelope<{ text: string }>(event.data);
               handlers.onToken?.(envelope.data, envelope.id);
