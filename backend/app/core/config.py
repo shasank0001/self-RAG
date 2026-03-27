@@ -43,9 +43,9 @@ class Settings(BaseSettings):
     )
     pinecone_host: str = Field(default="", alias="PINECONE_HOST")
 
-    embedding_provider: str = Field(default="ollama", alias="EMBEDDING_PROVIDER")
-    embedding_model: str = Field(default="qwen3-embedding:4b", alias="EMBEDDING_MODEL")
-    embedding_dimensions: int = Field(default=2560, alias="EMBEDDING_DIMENSIONS")
+    embedding_provider: str = Field(default="openrouter", alias="EMBEDDING_PROVIDER")
+    embedding_model: str = Field(default="openai/text-embedding-3-small", alias="EMBEDDING_MODEL")
+    embedding_dimensions: int = Field(default=1536, alias="EMBEDDING_DIMENSIONS")
     vector_index_backend: str = Field(default="pinecone", alias="VECTOR_INDEX_BACKEND")
 
     pipeline_config_path: str = Field(default="config.yaml", alias="PIPELINE_CONFIG_PATH")

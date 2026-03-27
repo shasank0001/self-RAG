@@ -22,7 +22,10 @@ def _coerce_uuid(value: object):
     if isinstance(value, UUID):
         return value
     if isinstance(value, str):
-        return UUID(value)
+        try:
+            return UUID(value)
+        except ValueError:
+            return None
     return None
 
 
@@ -106,6 +109,7 @@ async def retrieval_node(
             "edge_transitions": [*state.edge_transitions, "retrieval:skip_parametric"],
             "retrieved_documents": [],
             "relevant_documents": [],
+            "relevance_scores": {},
         }
 
     top_k = pipeline_config.pipeline.retrieval.top_k_per_namespace
@@ -122,12 +126,11 @@ async def retrieval_node(
     ) as span:
         query_vector, resolution = await embedding_router.embed_query(query=state.active_query, selected_bins=state.selected_bins)
 
-        namespace_map = {item.vector_namespace: item for item in state.selected_bins}
         bin_lookup = {str(item.id): item for item in state.selected_bins}
         grouped: dict[str, list[RetrievedDocument]] = {}
 
-        async def _query_namespace(namespace: str, bin_item: SelectedBin) -> tuple[str, list[RetrievedDocument]]:
-            _ = bin_item
+        async def _query_namespace(bin_item: SelectedBin) -> tuple[str, list[RetrievedDocument]]:
+            namespace = bin_item.vector_namespace
             matches = await vector_index.query(namespace=namespace, vector=query_vector, top_k=top_k)
             normalized: list[RetrievedDocument] = []
             for match in matches:
@@ -137,11 +140,11 @@ async def retrieval_node(
                 normalized.append(document)
 
             normalized.sort(key=lambda item: item.score, reverse=True)
-            return (namespace, normalized)
+            return (f"{namespace}:{bin_item.id}", normalized)
 
-        queried = await asyncio.gather(*[_query_namespace(namespace, item) for namespace, item in namespace_map.items()])
-        for namespace, normalized in queried:
-            grouped[namespace] = normalized
+        queried = await asyncio.gather(*[_query_namespace(item) for item in state.selected_bins])
+        for group_key, normalized in queried:
+            grouped[group_key] = normalized
 
         merged = _round_robin_merge(grouped_matches=grouped, merged_top_n=merged_top_n)
         relevance_scores = {item.chunk_id: item.score for item in merged}
@@ -150,7 +153,7 @@ async def retrieval_node(
         edge_label = "retrieval:empty" if not merged else "retrieval:docs"
 
         used_bins = [bin_item.id for bin_item in state.selected_bins]
-        retrieval_mode = RetrievalMode.GROUNDED if merged else RetrievalMode.PARAMETRIC
+        retrieval_mode = state.retrieval_mode or RetrievalMode.GROUNDED
         span.set_attribute("retrieved_docs_count", len(merged))
 
     metrics.observe("selfrag_retrieval_docs_count", float(len(merged)), mode=retrieval_mode.value)
@@ -165,9 +168,9 @@ async def retrieval_node(
     return {
         "next_step": next_step,
         "retrieval_mode": retrieval_mode,
-        "retrieved_documents": merged,
-        "relevant_documents": merged,
-        "relevance_scores": relevance_scores,
+        "retrieved_documents": merged if merged else [],
+        "relevant_documents": merged if merged else [],
+        "relevance_scores": relevance_scores if merged else {},
         "bin_ids_used": used_bins,
         "edge_transitions": [*state.edge_transitions, edge_label],
         "prompt_versions": {

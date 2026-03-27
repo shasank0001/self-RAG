@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { BinPicker } from "@/components/BinPicker";
 import { CitationPanel } from "@/components/CitationPanel";
+import { MessageContent } from "@/components/MessageContent";
 import { RetrievalModeBadge } from "@/components/RetrievalModeBadge";
 import { ThinkingPanel } from "@/components/ThinkingPanel";
 import {
@@ -151,6 +152,18 @@ export function ChatPage() {
     return "Idle";
   }, [status]);
 
+  const errorReason = useMemo(() => {
+    const reason = lastError?.details?.reason;
+    if (typeof reason !== "string") {
+      return null;
+    }
+    const trimmed = reason.trim();
+    if (!trimmed || trimmed === lastError?.message) {
+      return null;
+    }
+    return trimmed;
+  }, [lastError]);
+
   const onTranscriptScroll = () => {
     const messageList = messageListRef.current;
     if (!messageList) {
@@ -178,6 +191,7 @@ export function ChatPage() {
           <div className="stream-error">
             <strong>{lastError.code}</strong>
             <p>{lastError.message}</p>
+            {errorReason ? <p className="stream-error-reason">{errorReason}</p> : null}
             {sessionId ? (
               <button type="button" onClick={() => void retryFromCursor(sessionId)}>
                 Retry from cursor
@@ -230,7 +244,7 @@ export function ChatPage() {
                 <strong>{message.role === "assistant" ? "Assistant" : "You"}</strong>
                 {message.role === "assistant" ? <RetrievalModeBadge mode={message.retrieval_mode} /> : null}
               </header>
-              <p>{message.content}</p>
+              {message.role === "assistant" ? <MessageContent content={message.content} /> : <p>{message.content}</p>}
               {message.role === "assistant" ? <ThinkingPanel steps={message.thinkingSteps} /> : null}
               {message.role === "assistant" ? <CitationPanel citations={message.citationsNormalized} /> : null}
             </article>
@@ -243,7 +257,7 @@ export function ChatPage() {
                 <RetrievalModeBadge mode={streamCitations.length ? "grounded" : "parametric"} />
               </header>
               <ThinkingPanel steps={streamThinkingSteps} isStreaming />
-              {draftAssistantText ? <p>{draftAssistantText}</p> : null}
+              {draftAssistantText ? <MessageContent content={draftAssistantText} /> : null}
               <CitationPanel citations={streamCitations} />
             </article>
           ) : null}

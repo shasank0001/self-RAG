@@ -60,6 +60,24 @@ def load_eval_cases(dataset_path: Path) -> list[EvalCase]:
     return [EvalCase(**item) for item in payload]
 
 
+def _set_overlap_score(*, expected_ids: set[str], actual_ids: set[str]) -> tuple[float, float, float]:
+    if not expected_ids and not actual_ids:
+        return (1.0, 1.0, 1.0)
+    if not actual_ids:
+        return (0.0, 0.0, 0.0)
+    if not expected_ids:
+        return (0.0, 0.0, 0.0)
+
+    overlap = len(expected_ids.intersection(actual_ids))
+    recall = overlap / len(expected_ids)
+    precision = overlap / len(actual_ids)
+    if precision + recall == 0.0:
+        f1 = 0.0
+    else:
+        f1 = (2 * precision * recall) / (precision + recall)
+    return (recall, precision, f1)
+
+
 def score_eval_case(case: EvalCase, result: GraphExecutionResult) -> EvalResult:
     state = result.state
     actual_mode = state.retrieval_mode.value if state.retrieval_mode is not None else RetrievalMode.PARAMETRIC.value
@@ -67,15 +85,14 @@ def score_eval_case(case: EvalCase, result: GraphExecutionResult) -> EvalResult:
 
     expected_ids = set(case.expected_citation_chunk_ids)
     actual_ids = set(chunk_ids)
-    if expected_ids:
-        retrieval_hit_rate = len(expected_ids.intersection(actual_ids)) / len(expected_ids)
-    else:
-        retrieval_hit_rate = 1.0 if not actual_ids else 0.0
-
-    relevance_precision = 1.0 if actual_mode == case.expected_retrieval_mode else 0.0
-    grounding_score = 1.0 if actual_mode == case.expected_retrieval_mode else 0.0
+    retrieval_hit_rate, relevance_precision, grounding_score = _set_overlap_score(
+        expected_ids=expected_ids,
+        actual_ids=actual_ids,
+    )
 
     passed = (
+        actual_mode == case.expected_retrieval_mode
+        and
         retrieval_hit_rate >= case.expected_min_retrieval_hit_rate
         and relevance_precision >= case.expected_min_relevance_precision
         and grounding_score >= case.expected_min_grounding_score

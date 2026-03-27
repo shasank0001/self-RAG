@@ -39,14 +39,11 @@ def _resolve_cors_origins(settings: Settings) -> list[str]:
         return configured
 
     # Local development defaults for Vite and localhost aliases.
-    return [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-        "http://localhost:5175",
-        "http://127.0.0.1:5175",
-    ]
+    origins: list[str] = []
+    for port in range(5173, 5181):
+        origins.append(f"http://localhost:{port}")
+        origins.append(f"http://127.0.0.1:{port}")
+    return origins
 
 
 def create_app() -> FastAPI:

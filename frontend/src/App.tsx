@@ -16,7 +16,7 @@ export default function App() {
   const chatPath = activeSessionId ? `/chat/${activeSessionId}` : "/chat";
 
   return (
-    <div className="app-shell">
+    <div className={isChatRoute ? "app-shell is-chat-route" : "app-shell"}>
       <header className="topbar">
         <h1>Self-RAG Atlas</h1>
         <nav>

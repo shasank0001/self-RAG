@@ -240,11 +240,10 @@ Users can add content to a bin in two ways:
 | Relational DB          | PostgreSQL                                           | Proven, rich JSON support, Alembic-compatible           |
 | Vector store           | Pinecone Serverless                                  | Managed, namespace-based multi-tenancy, free tier       |
 | Pipeline orchestration | LangGraph                                            | Stateful graph, conditional edges, built for RAG        |
-| Embeddings — MVP       | Qwen3 Embedding 0.6b via Ollama                      | Local, zero-cost, 1024-dim, no API key required         |
+| Embeddings — default   | OpenRouter (`openai/text-embedding-3-small`)         | Managed 1536-dim embeddings over an OpenAI-compatible API |
 | Embeddings — upgrade   | Gemini Embedding 2 (`gemini-embedding-exp-03-07`)    | 3072-dim matryoshka, state-of-the-art retrieval quality |
-| LLM — graders          | Cerebras (`llama-3.3-70b`)                           | Ultra-fast inference for binary yes/no decisions        |
-| LLM — generation       | OpenRouter (`meta-llama/llama-3.1-8b-instruct:free`) | Flexible model routing, cost control                    |
-| LLM — local fallback   | Ollama (`llama3.2`)                                  | Offline capability, privacy-first option                |
+| LLM — all nodes        | OpenRouter (`openai/gpt-4o-mini`)                    | Single-provider routing and simpler environment setup   |
+| LLM — local fallback   | Ollama (`llama3.2`)                                  | Optional for legacy bins or offline deployments         |
 | Auth provider          | Clerk                                                | Hosted auth, social logins, webhooks, free tier         |
 
 ---
@@ -529,7 +528,8 @@ The embedding model is fully decoupled from the rest of the system. All embeddin
 
 | Provider | Model                        | Dimensions                           | Status            |
 | -------- | ---------------------------- | ------------------------------------ | ----------------- |
-| Ollama   | `qwen3-embedding:0.6b`       | 1024                                 | **MVP (default)** |
+| OpenRouter | `openai/text-embedding-3-small` | 1536                              | **Current default** |
+| Ollama   | `qwen3-embedding:0.6b`       | 1024                                 | Available         |
 | Gemini   | `gemini-embedding-exp-03-07` | 3072 (matryoshka, can reduce to 768) | Upgrade path      |
 | OpenAI   | `text-embedding-3-small`     | 1536                                 | Available         |
 
@@ -541,6 +541,7 @@ Every content item in a bin must be embedded with the same model. If the active 
 
 | Provider                      | Metric | Dimensions |
 | ----------------------------- | ------ | ---------- |
+| OpenRouter / OpenAI text-embedding-3-small | cosine | 1536       |
 | Ollama / Qwen3 0.6b           | cosine | 1024       |
 | Gemini Embedding 2            | cosine | 3072       |
 | OpenAI text-embedding-3-small | cosine | 1536       |
@@ -555,24 +556,24 @@ All LLM calls in the pipeline are resolved through a single `LLMRouter` class. E
 
 | Pipeline node        | Primary provider | Reason                         |
 | -------------------- | ---------------- | ------------------------------ |
-| Retrieval decision   | Cerebras         | Fast, cheap binary decision    |
-| Relevance grader     | Cerebras         | Fast, cheap binary decision    |
-| Query rewriter       | OpenRouter       | Needs reasoning capability     |
-| Answer generator     | OpenRouter       | Main generation, needs quality |
-| Hallucination grader | Cerebras         | Fast, cheap binary decision    |
+| Retrieval decision   | OpenRouter       | Unified provider configuration |
+| Relevance grader     | OpenRouter       | Unified provider configuration |
+| Query rewriter       | OpenRouter       | Unified provider configuration |
+| Answer generator     | OpenRouter       | Unified provider configuration |
+| Hallucination grader | OpenRouter       | Unified provider configuration |
 
 ### Supported LLM providers
 
 | Provider   | Notes                                                                                |
 | ---------- | ------------------------------------------------------------------------------------ |
-| Cerebras   | Native API; `llama-3.3-70b`; ultra-fast inference                                    |
-| OpenRouter | OpenAI-compatible API; wide model selection; `meta-llama/llama-3.1-8b-instruct:free` |
-| OpenAI     | Direct; `gpt-4o-mini`; used as high-quality fallback                                 |
-| Ollama     | Local; `llama3.2`; final fallback; no API key required                               |
+| OpenRouter | OpenAI-compatible API; wide model selection; `openai/gpt-4o-mini`                   |
+| Ollama     | Local; still supported for legacy bins or local-only deployments                     |
+| OpenAI     | Direct provider support remains available in code, but is no longer the default      |
+| Cerebras   | Direct provider support remains available in code, but is no longer the default      |
 
 ### Fallback chain
 
-The order is fully user-defined in `config.yaml`. The default is: Cerebras → OpenRouter → OpenAI → Ollama. To change it, edit the `fallback_chain` list. No code changes required.
+The order is fully user-defined in `config.yaml`. The current default is OpenRouter only. To add fallbacks later, edit the `fallback_chain` list. No code changes required.
 
 ---
 

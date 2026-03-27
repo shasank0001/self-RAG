@@ -37,6 +37,24 @@ def test_phase4_eval_harness_detects_regression_threshold_failures(tmp_path: Pat
     assert report_path.exists()
 
 
+def test_phase4_eval_harness_detects_ranking_and_grounding_regressions_with_correct_mode() -> None:
+    dataset_path = Path(__file__).resolve().parent / "evals" / "golden_phase4_eval_dataset.json"
+
+    def _bad_citation_runner(case):
+        result = build_stub_graph_result(case)
+        if case.id == "grounded_001":
+            result.state.retrieval_mode = RetrievalMode.GROUNDED
+            result.state.citations = []
+        return result
+
+    report = run_phase4_evaluation(dataset_path, runner=_bad_citation_runner)
+
+    assert report.totals["failed"] > 0
+    grounded_result = next(item for item in report.results if item["case_id"] == "grounded_001")
+    assert grounded_result["retrieval_mode"] == RetrievalMode.GROUNDED.value
+    assert grounded_result["grounding_score"] == 0.0
+
+
 def test_phase4_eval_harness_stub_runner_still_available_for_unit_paths() -> None:
     dataset_path = Path(__file__).resolve().parent / "evals" / "golden_phase4_eval_dataset.json"
     report = run_phase4_evaluation(dataset_path, runner=build_stub_graph_result)

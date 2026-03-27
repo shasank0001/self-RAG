@@ -8,7 +8,14 @@ from app.core.config import Settings
 from app.core.pipeline_config import SelfRagConfig
 from app.pipeline.state import ProviderMessage
 from app.router.error_types import RouterErrorType
-from app.router.llm_router import LLMRouter, ProviderAdapter, ProviderRequest, ProviderResponse, RouterCallError
+from app.router.llm_router import (
+    LLMRouter,
+    OpenAICompatibleAdapter,
+    ProviderAdapter,
+    ProviderRequest,
+    ProviderResponse,
+    RouterCallError,
+)
 
 
 @dataclass
@@ -171,3 +178,98 @@ async def test_transient_retry_happens_before_fallback() -> None:
     assert result.provider == "primary"
     assert len(adapters["primary"].calls) == 2
     assert adapters["secondary"].calls == []
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_adapter_flattens_content_parts(monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": "hello"},
+                                {"type": "text", "text": " world"},
+                            ],
+                        }
+                    }
+                ]
+            }
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url: str, json: dict[str, object], headers: dict[str, str]):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.router.llm_router.httpx.AsyncClient", lambda timeout: FakeClient())
+
+    adapter = OpenAICompatibleAdapter(
+        provider_name="openrouter",
+        api_key="or-key",
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+    response = await adapter.generate(
+        ProviderRequest(
+            provider="openrouter",
+            model="openai/gpt-5.4-mini",
+            node_name="answer_generator",
+            messages=[ProviderMessage(role="user", content="hello")],
+            timeout_ms=1000,
+        )
+    )
+
+    assert response.content == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_adapter_surfaces_http_error_detail(monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 400
+        text = '{"error":{"message":"temperature is not supported"}}'
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {"error": {"message": "temperature is not supported"}}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url: str, json: dict[str, object], headers: dict[str, str]):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.router.llm_router.httpx.AsyncClient", lambda timeout: FakeClient())
+
+    adapter = OpenAICompatibleAdapter(
+        provider_name="openrouter",
+        api_key="or-key",
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+    with pytest.raises(RouterCallError) as exc_info:
+        await adapter.generate(
+            ProviderRequest(
+                provider="openrouter",
+                model="openai/gpt-5.4-mini",
+                node_name="answer_generator",
+                messages=[ProviderMessage(role="user", content="hello")],
+                timeout_ms=1000,
+            )
+        )
+
+    assert exc_info.value.error_type == RouterErrorType.BAD_REQUEST
+    assert exc_info.value.message == "openrouter returned HTTP 400: temperature is not supported"

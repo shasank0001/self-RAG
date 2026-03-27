@@ -32,21 +32,19 @@ class LLMRetryConfig(BaseModel):
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    fallback_chain: list[str] = Field(default_factory=lambda: ["cerebras", "openai", "ollama"])
+    fallback_chain: list[str] = Field(default_factory=lambda: ["openrouter"])
     fallback_models: dict[str, str] = Field(
         default_factory=lambda: {
-            "cerebras": "qwen-3-235b-a22b-instruct-2507",
-            "openai": "gpt-4o-mini",
-            "ollama": "llama3.2",
+            "openrouter": "openai/gpt-5.4-mini",
         }
     )
     nodes: dict[str, LLMNodeConfig] = Field(
         default_factory=lambda: {
-            "retrieval_decision": LLMNodeConfig(provider="cerebras", model="qwen-3-235b-a22b-instruct-2507"),
-            "relevance_grader": LLMNodeConfig(provider="cerebras", model="qwen-3-235b-a22b-instruct-2507"),
-            "query_rewriter": LLMNodeConfig(provider="cerebras", model="qwen-3-235b-a22b-instruct-2507"),
-            "answer_generator": LLMNodeConfig(provider="cerebras", model="qwen-3-235b-a22b-instruct-2507"),
-            "hallucination_grader": LLMNodeConfig(provider="cerebras", model="qwen-3-235b-a22b-instruct-2507"),
+            "retrieval_decision": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
+            "relevance_grader": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
+            "query_rewriter": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
+            "answer_generator": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
+            "hallucination_grader": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
         }
     )
     timeouts_ms: LLMTimeoutConfig = Field(default_factory=LLMTimeoutConfig)
@@ -90,9 +88,9 @@ class PipelineConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    active_provider: str = "ollama"
-    active_model: str = "qwen3-embedding:4b"
-    dimensions: int = 2560
+    active_provider: str = "openrouter"
+    active_model: str = "openai/text-embedding-3-small"
+    dimensions: int = 1536
     enforce_ingest_alignment: bool = True
 
 

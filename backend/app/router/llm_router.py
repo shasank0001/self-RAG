@@ -58,7 +58,7 @@ class _OpenAIMessage(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     role: str
-    content: str
+    content: str | list[dict[str, Any] | str] | None = None
 
 
 class _OpenAIChoice(BaseModel):
@@ -89,6 +89,62 @@ class _OllamaResponse(BaseModel):
     eval_count: int | None = None
 
 
+def _normalize_message_content(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                text_parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if isinstance(text, str):
+                text_parts.append(text)
+                continue
+            nested_content = item.get("content")
+            if isinstance(nested_content, str):
+                text_parts.append(nested_content)
+        return "".join(text_parts)
+    raise TypeError("Unsupported assistant message content")
+
+
+def _extract_error_message(payload: object) -> str | None:
+    if isinstance(payload, str):
+        collapsed = " ".join(payload.split())
+        return collapsed or None
+    if not isinstance(payload, dict):
+        return None
+
+    for key in ("message", "detail", "error_description"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return " ".join(value.split())
+
+    nested_error = payload.get("error")
+    if nested_error is not None:
+        return _extract_error_message(nested_error)
+
+    return None
+
+
+def _response_error_detail(response: httpx.Response) -> str | None:
+    try:
+        detail = _extract_error_message(response.json())
+    except ValueError:
+        detail = None
+
+    if detail:
+        return detail[:240]
+
+    raw_text = " ".join(response.text.split())
+    return raw_text[:240] if raw_text else None
+
+
 def _classify_http_error(status_code: int) -> tuple[RouterErrorType, bool]:
     if status_code == 429:
         return (RouterErrorType.RATE_LIMIT, True)
@@ -97,6 +153,13 @@ def _classify_http_error(status_code: int) -> tuple[RouterErrorType, bool]:
     if status_code >= 500:
         return (RouterErrorType.UPSTREAM_5XX, True)
     return (RouterErrorType.BAD_REQUEST, False)
+
+
+def _openrouter_headers(settings: Settings) -> dict[str, str]:
+    return {
+        "HTTP-Referer": settings.api_base_url,
+        "X-Title": settings.app_name,
+    }
 
 
 class OpenAICompatibleAdapter:
@@ -146,9 +209,13 @@ class OpenAICompatibleAdapter:
 
         if response.status_code >= 400:
             error_type, retryable = _classify_http_error(response.status_code)
+            detail = _response_error_detail(response)
+            message = f"{self._provider_name} returned HTTP {response.status_code}"
+            if detail:
+                message = f"{message}: {detail}"
             raise RouterCallError(
                 error_type=error_type,
-                message=f"{self._provider_name} returned HTTP {response.status_code}",
+                message=message,
                 retryable=retryable,
                 status_code=response.status_code,
             )
@@ -169,10 +236,19 @@ class OpenAICompatibleAdapter:
                 retryable=False,
             )
 
+        try:
+            content = _normalize_message_content(response_payload.choices[0].message.content)
+        except TypeError as exc:
+            raise RouterCallError(
+                error_type=RouterErrorType.SCHEMA_ERROR,
+                message=f"{self._provider_name} returned malformed payload",
+                retryable=False,
+            ) from exc
+
         return ProviderResponse(
             provider=request.provider,
             model=request.model,
-            content=response_payload.choices[0].message.content,
+            content=content,
             raw_payload=response_payload.model_dump(mode="json"),
             usage=extract_usage_from_payload(response_payload.model_dump(mode="json")),
         )
@@ -249,7 +325,7 @@ def _build_default_adapters(settings: Settings) -> dict[str, ProviderAdapter]:
             provider_name="openrouter",
             api_key=settings.openrouter_api_key,
             base_url=settings.openrouter_base_url,
-            extra_headers={"HTTP-Referer": settings.api_base_url},
+            extra_headers=_openrouter_headers(settings),
         ),
         "cerebras": OpenAICompatibleAdapter(
             provider_name="cerebras",

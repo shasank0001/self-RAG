@@ -170,26 +170,25 @@ npm run build
 
 ## Embeddings (Current Default)
 
-- Provider: `ollama`
-- Model: `qwen3-embedding:4b`
-- Default dimensions: `2560`
+- Provider: `openrouter`
+- Model: `openai/text-embedding-3-small`
+- Default dimensions: `1536`
 
-Before running ingestion, pull the model locally:
+Notes:
+- Set `OPENROUTER_API_KEY` in `backend/.env`.
+- OpenRouter uses an OpenAI-compatible embeddings API, so no local model pull is needed.
+- Changing the embedding model/provider requires re-ingesting existing bins because stored vector dimensions must stay aligned.
 
-```bash
-ollama pull qwen3-embedding:4b
-```
-
-## Pinecone + Cerebras Setup
+## Pinecone + OpenRouter Setup
 
 - Pinecone required:
   - `PINECONE_API_KEY`
   - and one of:
     - `PINECONE_HOST` (recommended for production), or
     - `PINECONE_INDEX_NAME`
-- Cerebras required (for configured LLM nodes/fallback):
-  - `CEREBRAS_API_KEY`
-  - optional override: `CEREBRAS_BASE_URL` (default `https://api.cerebras.ai/v1`)
+- OpenRouter required:
+  - `OPENROUTER_API_KEY`
+  - optional override: `OPENROUTER_BASE_URL` (default `https://openrouter.ai/api/v1`)
 
 Notes:
 - For Pinecone host-based connections, you can use your index host directly (without protocol is preferred).

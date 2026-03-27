@@ -12,12 +12,33 @@ _worker_lock = asyncio.Lock()
 _worker_task: asyncio.Task[None] | None = None
 
 
+async def recover_ingestion_worker() -> None:
+    await schedule_ingestion_worker()
+
+
 async def schedule_ingestion_worker() -> None:
     global _worker_task
 
     async with _worker_lock:
         if _worker_task is None or _worker_task.done():
             _worker_task = asyncio.create_task(_drain_queue_once(), name="ingestion-worker")
+
+
+async def shutdown_ingestion_worker() -> None:
+    global _worker_task
+
+    async with _worker_lock:
+        if _worker_task is None or _worker_task.done():
+            _worker_task = None
+            return
+
+        _worker_task.cancel()
+        try:
+            await _worker_task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            _worker_task = None
 
 
 async def _schedule_after(delay_seconds: int) -> None:

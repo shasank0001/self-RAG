@@ -15,7 +15,7 @@ def _build_context(documents) -> str:
     return "\n\n".join(lines)
 
 
-def _build_citations(documents) -> list[Citation]:
+def _build_citations(documents, *, relevance_scores: dict[str, float]) -> list[Citation]:
     citations: list[Citation] = []
     for item in documents:
         excerpt = item.chunk_text[:320]
@@ -25,7 +25,7 @@ def _build_citations(documents) -> list[Citation]:
                 chunk_excerpt=excerpt,
                 bin_title=item.bin_title,
                 chunk_id=item.chunk_id,
-                score=item.score,
+                score=relevance_scores.get(item.chunk_id, item.score),
             )
         )
     return citations
@@ -64,7 +64,7 @@ async def answer_generator_node(
     return {
         "generation_attempts": state.generation_attempts + 1,
         "final_answer": answer,
-        "citations": _build_citations(grounded_docs),
+        "citations": _build_citations(grounded_docs, relevance_scores=state.relevance_scores),
         "retrieval_mode": retrieval_mode,
         "chosen_provider": response.provider,
         "chosen_model": response.model,

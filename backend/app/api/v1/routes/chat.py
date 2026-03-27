@@ -18,7 +18,7 @@ from app.api.middleware.request_context import bind_request_context
 from app.auth.dependencies import get_current_user
 from app.core.config import get_settings
 from app.core.errors import AppError, BadRequestError
-from app.db.session import get_db_session
+from app.db.session import SessionLocal, get_db_session
 from app.models.chat_message import ChatMessage, MessageRole, RetrievalMode
 from app.models.user import User
 from app.observability.events import LogEvent
@@ -448,26 +448,111 @@ async def create_chat_turn(
 ):
     settings = get_settings()
     heartbeat_interval_ms = max(settings.chat_stream_heartbeat_interval_ms, 1)
+    current_user_id = current_user.id
 
     async def generate():
         try:
             with bind_request_context(chat_id=str(session_id)):
                 logger.info(LogEvent.SSE_STREAM_STARTED, extra={"chat_id": str(session_id)})
-                await require_session_owner(session, session_id=session_id, owner_user_id=current_user.id)
-                effective_cursor = payload.cursor or last_event_id
+                async with SessionLocal() as stream_session:
+                    stream_user = User(id=current_user_id, clerk_user_id=current_user.clerk_user_id, email=current_user.email)
+                    await require_session_owner(stream_session, session_id=session_id, owner_user_id=current_user_id)
+                    effective_cursor = payload.cursor or last_event_id
 
-                if effective_cursor:
-                    logger.info(
-                        LogEvent.SSE_STREAM_RESUMED,
-                        extra={"chat_id": str(session_id), "cursor": effective_cursor},
-                    )
-                    replay_events = await _load_resume_events(
-                        session,
-                        current_user=current_user,
+                    if effective_cursor:
+                        logger.info(
+                            LogEvent.SSE_STREAM_RESUMED,
+                            extra={"chat_id": str(session_id), "cursor": effective_cursor},
+                        )
+                        replay_events = await _load_resume_events(
+                            stream_session,
+                            current_user=stream_user,
+                            session_id=session_id,
+                            cursor=effective_cursor,
+                        )
+                        for item in replay_events:
+                            await asyncio.sleep(0)
+                            yield _encode_sse(item)
+                            if item.event == "done":
+                                logger.info(
+                                    LogEvent.SSE_STREAM_DONE,
+                                    extra={"chat_id": str(session_id), "assistant_message_id": item.id.split(":", 1)[0]},
+                                )
+                        return
+
+                    if payload.message is None or not payload.message.strip():
+                        raise BadRequestError(code="message_required", message="Message is required when cursor is not provided")
+                    guard_text_payload(text=payload.message, field_name="message")
+
+                    prepared_turn = await prepare_chat_turn(
+                        stream_session,
+                        current_user=stream_user,
                         session_id=session_id,
-                        cursor=effective_cursor,
+                        user_message=payload.message,
+                        active_bin_ids=payload.bin_ids,
                     )
-                    for item in replay_events:
+
+                    assistant_message_id = uuid4()
+                    next_sequence = 1
+                    thinking_events: list[StreamEvent] = []
+                    thinking_steps: list[dict[str, Any]] = []
+                    task_attempts: dict[str, int] = {}
+                    task_context: dict[str, dict[str, Any]] = {}
+                    last_graph_state_payload: dict[str, Any] | None = None
+
+                    async for mode, data in stream_self_rag_graph(
+                        runtime=prepared_turn.graph_runtime,
+                        user_query=payload.message,
+                        selected_bins=prepared_turn.selected_bins,
+                    ):
+                        if mode == "values" and isinstance(data, dict):
+                            last_graph_state_payload = data
+                            continue
+                        if mode != "tasks" or not isinstance(data, dict):
+                            continue
+
+                        thinking_event = _task_to_thinking_event(
+                            assistant_message_id=assistant_message_id,
+                            sequence_number=next_sequence,
+                            task_payload=data,
+                            task_attempts=task_attempts,
+                            task_context=task_context,
+                        )
+                        if thinking_event is None:
+                            continue
+
+                        next_sequence += 1
+                        thinking_events.append(thinking_event)
+                        thinking_steps.append({**thinking_event.data, "ts": thinking_event.ts})
+                        await asyncio.sleep(0)
+                        yield _encode_sse(thinking_event)
+
+                    if last_graph_state_payload is None:
+                        raise BadRequestError(code="stream_empty", message="Graph produced no terminal state")
+
+                    graph_state = GraphState.model_validate(last_graph_state_payload)
+                    post_graph_events = _build_post_graph_events(
+                        assistant_message_id=assistant_message_id,
+                        session_id=session_id,
+                        graph_state=graph_state,
+                        thinking_steps=thinking_steps,
+                        heartbeat_interval_ms=heartbeat_interval_ms,
+                        start_sequence=next_sequence,
+                    )
+                    all_events = thinking_events + post_graph_events
+
+                    await persist_chat_turn_result(
+                        stream_session,
+                        current_user=stream_user,
+                        session_id=session_id,
+                        prepared_turn=prepared_turn,
+                        graph_state=graph_state,
+                        assistant_message_id=assistant_message_id,
+                        thinking_steps=thinking_steps,
+                        stream_events=[item.model_dump(mode="json") for item in all_events],
+                    )
+
+                    for item in post_graph_events:
                         await asyncio.sleep(0)
                         yield _encode_sse(item)
                         if item.event == "done":
@@ -475,88 +560,6 @@ async def create_chat_turn(
                                 LogEvent.SSE_STREAM_DONE,
                                 extra={"chat_id": str(session_id), "assistant_message_id": item.id.split(":", 1)[0]},
                             )
-                    return
-
-                if payload.message is None or not payload.message.strip():
-                    raise BadRequestError(code="message_required", message="Message is required when cursor is not provided")
-                guard_text_payload(text=payload.message, field_name="message")
-
-                prepared_turn = await prepare_chat_turn(
-                    session,
-                    current_user=current_user,
-                    session_id=session_id,
-                    user_message=payload.message,
-                    active_bin_ids=payload.bin_ids,
-                )
-
-                assistant_message_id = uuid4()
-                next_sequence = 1
-                thinking_events: list[StreamEvent] = []
-                thinking_steps: list[dict[str, Any]] = []
-                task_attempts: dict[str, int] = {}
-                task_context: dict[str, dict[str, Any]] = {}
-                last_graph_state_payload: dict[str, Any] | None = None
-
-                async for mode, data in stream_self_rag_graph(
-                    runtime=prepared_turn.graph_runtime,
-                    user_query=payload.message,
-                    selected_bins=prepared_turn.selected_bins,
-                ):
-                    if mode == "values" and isinstance(data, dict):
-                        last_graph_state_payload = data
-                        continue
-                    if mode != "tasks" or not isinstance(data, dict):
-                        continue
-
-                    thinking_event = _task_to_thinking_event(
-                        assistant_message_id=assistant_message_id,
-                        sequence_number=next_sequence,
-                        task_payload=data,
-                        task_attempts=task_attempts,
-                        task_context=task_context,
-                    )
-                    if thinking_event is None:
-                        continue
-
-                    next_sequence += 1
-                    thinking_events.append(thinking_event)
-                    thinking_steps.append({**thinking_event.data, "ts": thinking_event.ts})
-                    await asyncio.sleep(0)
-                    yield _encode_sse(thinking_event)
-
-                if last_graph_state_payload is None:
-                    raise BadRequestError(code="stream_empty", message="Graph produced no terminal state")
-
-                graph_state = GraphState.model_validate(last_graph_state_payload)
-                post_graph_events = _build_post_graph_events(
-                    assistant_message_id=assistant_message_id,
-                    session_id=session_id,
-                    graph_state=graph_state,
-                    thinking_steps=thinking_steps,
-                    heartbeat_interval_ms=heartbeat_interval_ms,
-                    start_sequence=next_sequence,
-                )
-                all_events = thinking_events + post_graph_events
-
-                await persist_chat_turn_result(
-                    session,
-                    current_user=current_user,
-                    session_id=session_id,
-                    prepared_turn=prepared_turn,
-                    graph_state=graph_state,
-                    assistant_message_id=assistant_message_id,
-                    thinking_steps=thinking_steps,
-                    stream_events=[item.model_dump(mode="json") for item in all_events],
-                )
-
-                for item in post_graph_events:
-                    await asyncio.sleep(0)
-                    yield _encode_sse(item)
-                    if item.event == "done":
-                        logger.info(
-                            LogEvent.SSE_STREAM_DONE,
-                            extra={"chat_id": str(session_id), "assistant_message_id": item.id.split(":", 1)[0]},
-                        )
         except asyncio.CancelledError:
             return
         except AppError as exc:

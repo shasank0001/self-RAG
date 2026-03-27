@@ -39,8 +39,8 @@ services:
       PINECONE_INDEX_NAME: self-rag-knowledge-chat
       PINECONE_REGION: us-east-1
       PINECONE_HOST: ""
-      CEREBRAS_API_KEY: ""
-      CEREBRAS_BASE_URL: https://api.cerebras.ai/v1
+      OPENROUTER_API_KEY: ""
+      OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
     ports:
       - "8000:8000"
     volumes:
