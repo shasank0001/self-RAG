@@ -40,6 +40,7 @@ export function ChatPage() {
   const streamCitations = useChatStore((state) => state.citations);
   const streamThinkingSteps = useChatStore((state) => state.thinkingSteps);
   const lastError = useChatStore((state) => state.lastError);
+  const resumeCursor = useChatStore((state) => state.cursor);
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const setActiveSession = useChatStore((state) => state.setActiveSession);
   const resetStreamState = useChatStore((state) => state.resetStreamState);
@@ -192,7 +193,7 @@ export function ChatPage() {
             <strong>{lastError.code}</strong>
             <p>{lastError.message}</p>
             {errorReason ? <p className="stream-error-reason">{errorReason}</p> : null}
-            {sessionId ? (
+            {sessionId && resumeCursor ? (
               <button type="button" onClick={() => void retryFromCursor(sessionId)}>
                 Retry from cursor
               </button>

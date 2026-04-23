@@ -76,14 +76,16 @@ export const useChatStore = create<ChatStore>()(
           draftAssistantText: "",
           citations: [],
           thinkingSteps: [],
-          cursor: cursor ?? state.cursor,
+          // The terminal `done` cursor cannot be used for stream resume.
+          cursor: null,
           retryCount: 0,
           lastError: null,
         })),
       markError: (payload) =>
-        set(() => ({
+        set((state) => ({
           status: "error",
           lastError: payload,
+          cursor: payload.code === "cursor_invalid" ? null : state.cursor,
         })),
       incrementRetry: () =>
         set((state) => ({
