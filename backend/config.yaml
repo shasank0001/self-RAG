@@ -8,6 +8,9 @@ llm:
     query_rewriter: { provider: openrouter, model: openai/gpt-5.4-mini }
     answer_generator: { provider: openrouter, model: openai/gpt-5.4-mini }
     hallucination_grader: { provider: openrouter, model: openai/gpt-5.4-mini }
+    research_planner: { provider: openrouter, model: openai/gpt-5.4-mini }
+    research_executor: { provider: openrouter, model: openai/gpt-5.4-mini }
+    research_synthesizer: { provider: openrouter, model: openai/gpt-5.4-mini }
   timeouts_ms:
     default: 12000
     generation: 25000
@@ -22,6 +25,11 @@ pipeline:
   retrieval:
     top_k_per_namespace: 5
     merged_top_n: 10
+  research:
+    enabled: true
+    max_sub_questions: 3
+    max_hops: 1
+    synthesizer_max_docs: 12
 
 embedding:
   active_provider: openrouter
@@ -55,3 +63,11 @@ prompts:
       id: hallucination_grader
       version: v1
       path: templates/hallucination_grader/v1.txt
+    research_planner:
+      id: research_planner
+      version: v1
+      path: templates/research_planner/v1.txt
+    research_synthesizer:
+      id: research_synthesizer
+      version: v1
+      path: templates/research_synthesizer/v1.txt

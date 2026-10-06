@@ -45,6 +45,9 @@ class LLMConfig(BaseModel):
             "query_rewriter": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
             "answer_generator": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
             "hallucination_grader": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
+            "research_planner": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
+            "research_executor": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
+            "research_synthesizer": LLMNodeConfig(provider="openrouter", model="openai/gpt-5.4-mini"),
         }
     )
     timeouts_ms: LLMTimeoutConfig = Field(default_factory=LLMTimeoutConfig)
@@ -75,6 +78,15 @@ class RetrievalConfig(BaseModel):
     merged_top_n: int = 10
 
 
+class ResearchConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    max_sub_questions: int = 3
+    max_hops: int = 1
+    synthesizer_max_docs: int = 12
+
+
 class PipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -83,6 +95,7 @@ class PipelineConfig(BaseModel):
     relevance_threshold: float = 0.5
     node_timeout_ms: int = 30000
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    research: ResearchConfig = Field(default_factory=ResearchConfig)
 
 
 class EmbeddingConfig(BaseModel):
@@ -136,6 +149,16 @@ class PromptConfig(BaseModel):
                 id="hallucination_grader",
                 version="v1",
                 path="templates/hallucination_grader/v1.txt",
+            ),
+            "research_planner": PromptNodeConfig(
+                id="research_planner",
+                version="v1",
+                path="templates/research_planner/v1.txt",
+            ),
+            "research_synthesizer": PromptNodeConfig(
+                id="research_synthesizer",
+                version="v1",
+                path="templates/research_synthesizer/v1.txt",
             ),
         }
     )

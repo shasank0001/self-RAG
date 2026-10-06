@@ -16,6 +16,9 @@ from app.pipeline.nodes.answer_generator import answer_generator_node
 from app.pipeline.nodes.hallucination_grader import hallucination_grader_node
 from app.pipeline.nodes.query_rewriter import query_rewriter_node
 from app.pipeline.nodes.relevance_grader import relevance_grader_node
+from app.pipeline.nodes.research_executor import research_executor_node
+from app.pipeline.nodes.research_planner import research_planner_node
+from app.pipeline.nodes.research_synthesizer import research_synthesizer_node
 from app.pipeline.nodes.retrieval import retrieval_node
 from app.pipeline.nodes.retrieval_decision import retrieval_decision_node
 from app.pipeline.prompts.registry import PromptRegistry
@@ -115,11 +118,31 @@ def _route_after_hallucination(state: GraphState) -> str:
     if state.next_step == NodeOutcome.ABORT or state.error is not None:
         return "abort"
     if state.next_step == NodeOutcome.REGENERATE:
+        if state.research_mode and state.research_plan:
+            return "research_synthesizer"
         return "answer_generator"
     return END
 
 
+def _route_after_research_planner(state: GraphState) -> str:
+    if state.next_step == NodeOutcome.ABORT or state.error is not None:
+        return "abort"
+    if state.research_mode and state.research_plan:
+        return "research_executor"
+    return "retrieval_decision"
+
+
+def _route_after_research_executor(state: GraphState) -> str:
+    if state.next_step == NodeOutcome.ABORT or state.error is not None:
+        return "abort"
+    if state.research_mode and state.relevant_documents:
+        return "research_synthesizer"
+    return "retrieval_decision"
+
+
 def _route_from_start(state: GraphState) -> str:
+    if state.research_mode and state.selected_bins:
+        return "research_planner"
     if not state.selected_bins:
         return "answer_generator"
     return "retrieval_decision"
@@ -293,6 +316,32 @@ def _build_compiled_graph(runtime: GraphRuntime):
             pipeline_config=runtime.pipeline_config,
         )
 
+    async def _research_planner(state: GraphState) -> dict[str, Any]:
+        return await research_planner_node(
+            state,
+            router=runtime.router,
+            prompt_registry=runtime.prompt_registry,
+            pipeline_config=runtime.pipeline_config,
+        )
+
+    async def _research_executor(state: GraphState) -> dict[str, Any]:
+        return await research_executor_node(
+            state,
+            vector_index=runtime.vector_index,
+            embedding_router=runtime.embedding_router,
+            pipeline_config=runtime.pipeline_config,
+            router=runtime.router,
+            prompt_registry=runtime.prompt_registry,
+        )
+
+    async def _research_synthesizer(state: GraphState) -> dict[str, Any]:
+        return await research_synthesizer_node(
+            state,
+            router=runtime.router,
+            prompt_registry=runtime.prompt_registry,
+            pipeline_config=runtime.pipeline_config,
+        )
+
     async def _abort(_: GraphState) -> dict[str, Any]:
         return {}
 
@@ -321,9 +370,21 @@ def _build_compiled_graph(runtime: GraphRuntime):
         "hallucination_grader",
         cast(Any, _with_node_timeout(node_name="hallucination_grader", timeout_ms=timeout_ms, node_callable=_hallucination_grader)),
     )
+    builder.add_node(
+        "research_planner",
+        cast(Any, _with_node_timeout(node_name="research_planner", timeout_ms=timeout_ms, node_callable=_research_planner)),
+    )
+    builder.add_node(
+        "research_executor",
+        cast(Any, _with_node_timeout(node_name="research_executor", timeout_ms=timeout_ms, node_callable=_research_executor)),
+    )
+    builder.add_node(
+        "research_synthesizer",
+        cast(Any, _with_node_timeout(node_name="research_synthesizer", timeout_ms=timeout_ms, node_callable=_research_synthesizer)),
+    )
     builder.add_node("abort", cast(Any, _abort))
 
-    builder.add_conditional_edges(START, _route_from_start, ["retrieval_decision", "answer_generator"])
+    builder.add_conditional_edges(START, _route_from_start, ["research_planner", "retrieval_decision", "answer_generator"])
     builder.add_conditional_edges("retrieval_decision", _route_after_decision, ["retrieval", "answer_generator", "abort"])
     builder.add_conditional_edges("retrieval", _route_after_retrieval, ["relevance_grader", "query_rewriter", "abort"])
     builder.add_conditional_edges(
@@ -333,19 +394,31 @@ def _build_compiled_graph(runtime: GraphRuntime):
     )
     builder.add_conditional_edges("query_rewriter", _route_after_rewrite, ["retrieval", "answer_generator", "abort"])
     builder.add_conditional_edges("answer_generator", _route_after_answer, ["hallucination_grader", END, "abort"])
-    builder.add_conditional_edges("hallucination_grader", _route_after_hallucination, ["answer_generator", END, "abort"])
+    builder.add_conditional_edges("hallucination_grader", _route_after_hallucination, ["answer_generator", "research_synthesizer", END, "abort"])
+    builder.add_conditional_edges(
+        "research_planner",
+        _route_after_research_planner,
+        ["research_executor", "retrieval_decision", "abort"],
+    )
+    builder.add_conditional_edges(
+        "research_executor",
+        _route_after_research_executor,
+        ["research_synthesizer", "retrieval_decision", "abort"],
+    )
+    builder.add_conditional_edges("research_synthesizer", _route_after_answer, ["hallucination_grader", END, "abort"])
     builder.add_edge("abort", END)
 
     return builder.compile()
 
 
-def _initial_graph_state(*, user_query: str, selected_bins: list[SelectedBin]) -> GraphState:
+def _initial_graph_state(*, user_query: str, selected_bins: list[SelectedBin], research_mode: bool = False) -> GraphState:
     selected_bin_ids = [item.id for item in selected_bins]
     return GraphState(
         user_query=user_query,
         selected_bins=selected_bins,
         selected_bin_ids=selected_bin_ids,
         bin_ids_used=selected_bin_ids,
+        research_mode=research_mode,
     )
 
 
@@ -374,12 +447,13 @@ async def stream_self_rag_graph(
     runtime: GraphRuntime,
     user_query: str,
     selected_bins: list[SelectedBin],
+    research_mode: bool = False,
 ) -> AsyncIterator[tuple[str, Any]]:
-    initial_state = _initial_graph_state(user_query=user_query, selected_bins=selected_bins)
+    initial_state = _initial_graph_state(user_query=user_query, selected_bins=selected_bins, research_mode=research_mode)
     graph = _build_compiled_graph(runtime)
     last_state_payload: dict[str, Any] | None = None
 
-    logger.info("graph.execution.started", extra={"bin_count": len(selected_bins)})
+    logger.info("graph.execution.started", extra={"bin_count": len(selected_bins), "research_mode": research_mode})
     with start_span("graph.execution", attributes={"selected_bin_count": len(selected_bins)}):
         async for item in graph.astream(initial_state, stream_mode=["tasks", "values"]):
             if isinstance(item, tuple) and len(item) == 2 and item[0] == "values" and isinstance(item[1], dict):
@@ -395,10 +469,11 @@ async def run_self_rag_graph(
     runtime: GraphRuntime,
     user_query: str,
     selected_bins: list[SelectedBin],
+    research_mode: bool = False,
 ) -> GraphExecutionResult:
-    initial_state = _initial_graph_state(user_query=user_query, selected_bins=selected_bins)
+    initial_state = _initial_graph_state(user_query=user_query, selected_bins=selected_bins, research_mode=research_mode)
     graph = _build_compiled_graph(runtime)
-    logger.info("graph.execution.started", extra={"bin_count": len(selected_bins)})
+    logger.info("graph.execution.started", extra={"bin_count": len(selected_bins), "research_mode": research_mode})
     with start_span("graph.execution", attributes={"selected_bin_count": len(selected_bins)}):
         result = await graph.ainvoke(initial_state)
     final_state = GraphState.model_validate(result)

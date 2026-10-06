@@ -70,7 +70,7 @@ async def test_chat_turn_persists_retrieval_mode_citations_and_provider_metadata
             )
         ]
 
-    async def fake_run_graph(*, runtime, user_query, selected_bins):
+    async def fake_run_graph(*, runtime, user_query, selected_bins, research_mode=False):
         return GraphExecutionResult(
             state=GraphState(
                 user_query=user_query,
@@ -153,7 +153,7 @@ async def test_chat_turn_raises_bad_request_for_alignment_errors(monkeypatch) ->
     async def fake_list_owned_bins(_session, *, owner_user_id, bin_ids):
         return []
 
-    async def fake_run_graph(*, runtime, user_query, selected_bins):
+    async def fake_run_graph(*, runtime, user_query, selected_bins, research_mode=False):
         return GraphExecutionResult(
             state=GraphState(
                 user_query=user_query,
@@ -205,7 +205,7 @@ async def test_chat_turn_raises_upstream_error_for_provider_failures(monkeypatch
     async def fake_list_owned_bins(_session, *, owner_user_id, bin_ids):
         return []
 
-    async def fake_run_graph(*, runtime, user_query, selected_bins):
+    async def fake_run_graph(*, runtime, user_query, selected_bins, research_mode=False):
         return GraphExecutionResult(
             state=GraphState(
                 user_query=user_query,

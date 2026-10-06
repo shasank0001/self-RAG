@@ -318,6 +318,7 @@ Data flow: TanStack Query owns server state (bins, items, sessions, messages, in
 - Streaming endpoint: `POST /api/v1/chat/sessions/{session_id}/message`
 - Full wire contract: `docs/phase5_sse_contract.md` (event envelope, `thinking`/`token`/`citations`/`done`/`error`, cursor resume, `Last-Event-ID`).
 - New stream: send `{message, bin_ids?}`. Resume: send `{cursor}` (`assistant_message_id:sequence_number`).
+- Deep research: send `research: true` with `message` and at least one selected bin. The graph plans up to 3 sub-questions (bounded by `pipeline.research` config), retrieves per sub-question with one rewrite hop each, then synthesizes a structured report with per-claim citations. Progress streams as `thinking` events (`research_planner`, `research_executor`, `research_synthesizer`).
 - Backend stream env: `CHAT_STREAM_HEARTBEAT_INTERVAL_MS=10000`
 - Frontend retry env: `CHAT_STREAM_RETRY_MAX_ATTEMPTS=5`, `CHAT_STREAM_RETRY_BASE_MS=500`
 

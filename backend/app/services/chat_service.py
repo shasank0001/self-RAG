@@ -35,6 +35,7 @@ class PreparedChatTurn:
     graph_runtime: GraphRuntime
     selected_bin_ids: list[UUID]
     selected_bins: list[SelectedBin]
+    research_mode: bool = False
 
 
 def _to_selected_bin(bin_record) -> SelectedBin:
@@ -169,6 +170,7 @@ async def prepare_chat_turn(
     user_message: str,
     active_bin_ids: list[UUID] | None = None,
     runtime: GraphRuntime | None = None,
+    research_mode: bool = False,
 ) -> PreparedChatTurn:
     chat_session = await require_session_owner(session, session_id=session_id, owner_user_id=current_user.id)
     selected_bin_ids = active_bin_ids if active_bin_ids is not None else list(chat_session.last_active_bin_ids)
@@ -198,6 +200,7 @@ async def prepare_chat_turn(
         graph_runtime=runtime or build_graph_runtime(),
         selected_bin_ids=selected_bin_ids,
         selected_bins=selected_bins,
+        research_mode=research_mode,
     )
 
 
@@ -257,6 +260,7 @@ async def run_chat_turn(
     user_message: str,
     active_bin_ids: list[UUID] | None = None,
     runtime: GraphRuntime | None = None,
+    research_mode: bool = False,
 ) -> ChatTurnResult:
     with bind_request_context(chat_id=str(session_id)):
         with start_span("chat.turn", attributes={"chat_id": str(session_id), "bin_count": len(active_bin_ids or [])}):
@@ -267,11 +271,13 @@ async def run_chat_turn(
                 user_message=user_message,
                 active_bin_ids=active_bin_ids,
                 runtime=runtime,
+                research_mode=research_mode,
             )
             execution = await run_self_rag_graph(
                 runtime=prepared_turn.graph_runtime,
                 user_query=user_message,
                 selected_bins=prepared_turn.selected_bins,
+                research_mode=prepared_turn.research_mode,
             )
 
         return await persist_chat_turn_result(

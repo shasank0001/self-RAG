@@ -107,6 +107,12 @@ class QueryRewritePayload(BaseModel):
     rewritten_query: str
 
 
+class ResearchPlanPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sub_questions: list[str] = Field(default_factory=list)
+
+
 class GenerationPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -180,6 +186,10 @@ class GraphState(BaseModel):
     chosen_provider: str | None = None
     chosen_model: str | None = None
     hallucination_feedback: str | None = None
+
+    research_mode: bool = False
+    research_plan: list[str] = Field(default_factory=list)
+    research_hops_used: int = 0
 
     next_step: NodeOutcome | None = None
     error: GraphError | None = None

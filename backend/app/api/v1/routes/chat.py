@@ -37,6 +37,9 @@ THINKING_LABELS: dict[str, str] = {
     "query_rewriter": "Rewriting search query",
     "answer_generator": "Drafting answer",
     "hallucination_grader": "Verifying grounding",
+    "research_planner": "Planning deep research",
+    "research_executor": "Running research searches",
+    "research_synthesizer": "Writing research report",
 }
 
 
@@ -51,6 +54,7 @@ class ChatTurnRequest(BaseModel):
     message: str | None = Field(default=None, min_length=1)
     bin_ids: list[UUID] | None = None
     cursor: str | None = None
+    research: bool = False
 
 
 class ChatTurnResponse(BaseModel):
@@ -287,6 +291,12 @@ def _thinking_started_detail(node_name: str) -> str:
         return "Composing the assistant response."
     if node_name == "hallucination_grader":
         return "Running a grounding check on the draft."
+    if node_name == "research_planner":
+        return "Breaking the question into research steps."
+    if node_name == "research_executor":
+        return "Searching the active bins for each step."
+    if node_name == "research_synthesizer":
+        return "Writing the research report."
     return "Running this step."
 
 
@@ -323,6 +333,23 @@ def _thinking_completed_detail(node_name: str, result: dict[str, Any]) -> str:
         if next_step == NodeOutcome.REGENERATE:
             return "Requested another answer pass."
         return "Grounding check passed."
+    if node_name == "research_planner":
+        plan = result.get("research_plan")
+        if isinstance(plan, list) and plan:
+            return f"Planned {len(plan)} research step(s)."
+        return "Falling back to standard search."
+    if node_name == "research_executor":
+        docs = result.get("relevant_documents")
+        if isinstance(docs, list):
+            return f"Gathered {len(docs)} research document(s)."
+        return "Research search completed."
+    if node_name == "research_synthesizer":
+        retrieval_mode = result.get("retrieval_mode")
+        if hasattr(retrieval_mode, "value"):
+            retrieval_mode = retrieval_mode.value
+        if retrieval_mode == "grounded":
+            return "Drafted the research report."
+        return "Drafted a parametric answer."
     return "Step completed."
 
 
@@ -490,6 +517,7 @@ async def create_chat_turn(
                         session_id=session_id,
                         user_message=payload.message,
                         active_bin_ids=payload.bin_ids,
+                        research_mode=payload.research,
                     )
 
                     assistant_message_id = uuid4()
@@ -504,6 +532,7 @@ async def create_chat_turn(
                         runtime=prepared_turn.graph_runtime,
                         user_query=payload.message,
                         selected_bins=prepared_turn.selected_bins,
+                        research_mode=prepared_turn.research_mode,
                     ):
                         if mode == "values" and isinstance(data, dict):
                             last_graph_state_payload = data
@@ -615,5 +644,6 @@ async def create_chat_turn_sync(
         session_id=session_id,
         user_message=payload.message,
         active_bin_ids=payload.bin_ids,
+        research_mode=payload.research,
     )
     return _legacy_chat_turn_response(result.assistant_message)

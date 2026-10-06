@@ -14,13 +14,15 @@ This document defines the streaming protocol for chat turns over authenticated `
 {
   "message": "string | optional when cursor is provided",
   "bin_ids": ["uuid", "..."],
-  "cursor": "assistant_message_id:sequence_number"
+  "cursor": "assistant_message_id:sequence_number",
+  "research": "boolean | default false, deep-research mode"
 }
 ```
 
 Rules:
 
 - New stream: send `message` and optional `bin_ids`.
+- Deep research: send `research: true` with `message` and at least one selected bin. The graph plans up to 3 sub-questions (bounded by `pipeline.research` config), retrieves per sub-question with one rewrite hop each, then synthesizes a structured report with per-claim citations. Progress streams as `thinking` events (`research_planner`, `research_executor`, `research_synthesizer`).
 - Resume stream: send `cursor` (or `Last-Event-ID` header).
 - If no `message` is provided and no valid `cursor` exists, server emits `error` event.
 
