@@ -38,3 +38,18 @@ frontend/.env.local
 # Local database backups
 *.dump
 ops/db/**/backups/
+
+# Uploaded user content (runtime data, never commit)
+data/
+uploads/
+
+# Build artifacts
+*.tsbuildinfo
+frontend/*.tsbuildinfo
+
+# Scratch notebooks and checkpoints
+*.ipynb
+.ipynb_checkpoints/
+
+# Generated eval reports (recreate with backend/scripts/run_phase4_evals.py)
+backend/tests/evals/phase4_eval_report.json
